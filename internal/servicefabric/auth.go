@@ -69,6 +69,7 @@ type EntraOptions struct {
 	TenantID             string
 	ClientID             string
 	ClientSecret         string
+	DefaultCredentialType string
 }
 
 // EntraAuthenticator acquires bearer tokens using Azure Identity credentials.
@@ -87,16 +88,10 @@ func NewEntraAuthenticator(opts EntraOptions) (Authenticator, error) {
 
 	var cred azcore.TokenCredential
 	var err error
-
-	switch {
-	case opts.ClientID != "" && opts.ClientSecret != "":
+	if opts.ClientID != "" && opts.ClientSecret != "" {
 		cred, err = azidentity.NewClientSecretCredential(opts.TenantID, opts.ClientID, opts.ClientSecret, nil)
-	default:
-		options := &azidentity.DefaultAzureCredentialOptions{}
-		if opts.TenantID != "" {
-			options.TenantID = opts.TenantID
-		}
-		cred, err = azidentity.NewDefaultAzureCredential(options)
+	} else {
+		cred, err = buildDefaultAzureCredential(opts)
 	}
 	if err != nil {
 		return nil, err
@@ -106,6 +101,48 @@ func NewEntraAuthenticator(opts EntraOptions) (Authenticator, error) {
 		cred:  cred,
 		scope: scope,
 	}, nil
+}
+
+func buildDefaultAzureCredential(opts EntraOptions) (azcore.TokenCredential, error) {
+	switch opts.DefaultCredentialType {
+	case "", "default":
+		options := &azidentity.DefaultAzureCredentialOptions{}
+		if opts.TenantID != "" {
+			options.TenantID = opts.TenantID
+		}
+		return azidentity.NewDefaultAzureCredential(options)
+	case "environment":
+		return azidentity.NewEnvironmentCredential(nil)
+	case "workload_identity":
+		options := &azidentity.WorkloadIdentityCredentialOptions{
+			ClientID: opts.ClientID,
+			TenantID: opts.TenantID,
+		}
+		return azidentity.NewWorkloadIdentityCredential(options)
+	case "managed_identity":
+		options := &azidentity.ManagedIdentityCredentialOptions{}
+		if opts.ClientID != "" {
+			options.ID = azidentity.ClientID(opts.ClientID)
+		}
+		return azidentity.NewManagedIdentityCredential(options)
+	case "azure_cli":
+		options := &azidentity.AzureCLICredentialOptions{
+			TenantID: opts.TenantID,
+		}
+		return azidentity.NewAzureCLICredential(options)
+	case "azure_developer_cli":
+		options := &azidentity.AzureDeveloperCLICredentialOptions{
+			TenantID: opts.TenantID,
+		}
+		return azidentity.NewAzureDeveloperCLICredential(options)
+	case "azure_powershell":
+		options := &azidentity.AzurePowerShellCredentialOptions{
+			TenantID: opts.TenantID,
+		}
+		return azidentity.NewAzurePowerShellCredential(options)
+	default:
+		return nil, fmt.Errorf("unsupported credential type %q", opts.DefaultCredentialType)
+	}
 }
 
 func (a *EntraAuthenticator) ConfigureHTTPClient(_ *http.Client) error {

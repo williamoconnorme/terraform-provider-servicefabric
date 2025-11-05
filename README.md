@@ -35,19 +35,16 @@ provider "servicefabric" {
   endpoint        = "https://my-sf-cluster.contoso.com:19080"
   skip_tls_verify = false
 
-  # Choose one authentication option:
-
-  # 1. Certificate-based auth
-  # auth_type                = "certificate" # default
-  # client_certificate_path  = "C:\\certs\\sf-client.pfx"
+  # Certificate-based auth (optional)
+  # client_certificate_path     = "C:\\certs\\sf-client.pfx"
   # client_certificate_password = var.sf_cert_password
 
-  # 2. Entra ID (Azure AD) auth
-  auth_type              = "entra"
-  cluster_application_id = "00000000-0000-0000-0000-000000000000"
-  tenant_id              = "11111111-1111-1111-1111-111111111111"
-  client_id              = "22222222-2222-2222-2222-222222222222"
-  client_secret          = var.service_principal_secret
+  # Entra ID (Azure AD) auth (used when no certificate path is provided)
+  cluster_application_id  = "00000000-0000-0000-0000-000000000000"
+  tenant_id               = "11111111-1111-1111-1111-111111111111"
+  client_id               = "22222222-2222-2222-2222-222222222222"
+  client_secret           = var.service_principal_secret
+  # default_credential_type = "azure_cli" # Optional override of the DefaultAzureCredential chain
 }
 ```
 
@@ -55,8 +52,8 @@ Optional provider argument `application_recreate_on_upgrade` (default `true`) co
 
 ### Authentication Notes
 
-- **Certificate** authentication expects a PKCS#12 (`.pfx`) file containing the client certificate and key.
-- **Entra** authentication requests a token for the cluster's server application ID. When `client_id`/`client_secret` are omitted the provider falls back to `DefaultAzureCredential`, which supports Azure CLI login, Managed Identity, and workload identity.
+- **Certificate** authentication expects a PKCS#12 (`.pfx`) file containing the client certificate and key. Supplying `client_certificate_path` switches the provider to certificate mode.
+- **Entra** authentication is used automatically when no certificate is configured. Provide the `cluster_application_id` and optionally `tenant_id`, `client_id`, and `client_secret`. When `client_secret` is omitted the provider falls back to `DefaultAzureCredential` (Azure CLI, Azure Developer CLI, Managed Identity, workload identity, Azure PowerShell, environment credentials, etc.). Set `default_credential_type` to force a specific credential from that chain.
 
 ## Managed Resources
 
@@ -121,16 +118,16 @@ provider "servicefabric" {
   endpoint        = "https://cluster.example.com:19080"
   skip_tls_verify = false
 
-  # Certificate auth (default)
+  # Certificate auth (optional)
   # client_certificate_path     = "C:\\certs\\service-fabric-client.pfx"
   # client_certificate_password = var.sf_client_cert_password
 
-  # Entra auth
-  auth_type              = "entra"
-  cluster_application_id = "00000000-0000-0000-0000-000000000000"
-  tenant_id              = "11111111-1111-1111-1111-111111111111"
-  client_id              = "22222222-2222-2222-2222-222222222222"
-  client_secret          = var.service_principal_secret
+  # Entra auth (default when no certificate is supplied)
+  cluster_application_id  = "00000000-0000-0000-0000-000000000000"
+  tenant_id               = "11111111-1111-1111-1111-111111111111"
+  client_id               = "22222222-2222-2222-2222-222222222222"
+  client_secret           = var.service_principal_secret
+  # default_credential_type = "managed_identity"
 }
 
 resource "servicefabric_application_type" "sample" {

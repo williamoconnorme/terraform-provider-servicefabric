@@ -12,7 +12,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	providerschema "github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	schemavalidator "github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/williamoconnorme/terraform-provider-servicefabric/internal/servicefabric"
 )
@@ -29,11 +31,11 @@ func New() provider.Provider {
 type serviceFabricProviderModel struct {
 	Endpoint                     types.String `tfsdk:"endpoint"`
 	SkipTLSVerify                types.Bool   `tfsdk:"skip_tls_verify"`
-	AuthType                     types.String `tfsdk:"auth_type"`
 	ClusterApplicationID         types.String `tfsdk:"cluster_application_id"`
 	TenantID                     types.String `tfsdk:"tenant_id"`
 	ClientID                     types.String `tfsdk:"client_id"`
 	ClientSecret                 types.String `tfsdk:"client_secret"`
+	DefaultCredentialType        types.String `tfsdk:"default_credential_type"`
 	ClientCertificatePath        types.String `tfsdk:"client_certificate_path"`
 	ClientCertificatePassword    types.String `tfsdk:"client_certificate_password"`
 	ApplicationRecreateOnUpgrade types.Bool   `tfsdk:"application_recreate_on_upgrade"`
@@ -67,17 +69,13 @@ func (p *serviceFabricProvider) Schema(_ context.Context, _ provider.SchemaReque
 				Optional:    true,
 				Description: "Skip verification of the server's TLS certificate. Use only for development.",
 			},
-			"auth_type": providerschema.StringAttribute{
-				Optional:    true,
-				Description: "Authentication type for the Service Fabric REST API. Supported values: \"certificate\", \"entra\".",
-			},
 			"cluster_application_id": providerschema.StringAttribute{
 				Optional:    true,
 				Description: "Service Fabric server application ID used when requesting Entra tokens.",
 			},
 			"tenant_id": providerschema.StringAttribute{
 				Optional:    true,
-				Description: "Entra tenant ID. Required for auth_type \"entra\" when default credentials are insufficient.",
+				Description: "Entra tenant ID used when requesting tokens.",
 			},
 			"client_id": providerschema.StringAttribute{
 				Optional:    true,
@@ -87,6 +85,13 @@ func (p *serviceFabricProvider) Schema(_ context.Context, _ provider.SchemaReque
 				Optional:    true,
 				Sensitive:   true,
 				Description: "Entra client secret for the specified client_id.",
+			},
+			"default_credential_type": providerschema.StringAttribute{
+				Optional:    true,
+				Description: "Override the DefaultAzureCredential chain with a single credential type. Supported values: \"default\", \"environment\", \"workload_identity\", \"managed_identity\", \"azure_cli\", \"azure_developer_cli\", \"azure_powershell\".",
+				Validators: []schemavalidator.String{
+					stringvalidator.OneOf("default", "environment", "workload_identity", "managed_identity", "azure_cli", "azure_developer_cli", "azure_powershell"),
+				},
 			},
 			"client_certificate_path": providerschema.StringAttribute{
 				Optional:    true,
@@ -111,12 +116,6 @@ func (p *serviceFabricProvider) Configure(ctx context.Context, req provider.Conf
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 	if resp.Diagnostics.HasError() {
 		return
-	}
-
-	// Determine authentication mode.
-	authType := "certificate"
-	if !config.AuthType.IsNull() {
-		authType = config.AuthType.ValueString()
 	}
 
 	if config.Endpoint.IsNull() || config.Endpoint.ValueString() == "" {
@@ -144,13 +143,18 @@ func (p *serviceFabricProvider) Configure(ctx context.Context, req provider.Conf
 	var auth servicefabric.Authenticator
 	var err error
 
-	switch authType {
-	case "certificate":
+	authMode := "entra"
+	defaultCredentialType := ""
+
+	useCertificate := !config.ClientCertificatePath.IsNull() && config.ClientCertificatePath.ValueString() != ""
+
+	if useCertificate {
+		authMode = "certificate"
 		if config.ClientCertificatePath.IsNull() || config.ClientCertificatePath.ValueString() == "" {
 			resp.Diagnostics.AddAttributeError(
 				path.Root("client_certificate_path"),
 				"Missing client certificate",
-				"The provider requires client_certificate_path when auth_type is \"certificate\".",
+				"The provider requires client_certificate_path when using certificate authentication.",
 			)
 			return
 		}
@@ -166,12 +170,12 @@ func (p *serviceFabricProvider) Configure(ctx context.Context, req provider.Conf
 			)
 			return
 		}
-	case "entra":
+	} else {
 		if config.ClusterApplicationID.IsNull() || config.ClusterApplicationID.ValueString() == "" {
 			resp.Diagnostics.AddAttributeError(
 				path.Root("cluster_application_id"),
 				"Missing cluster application ID",
-				"The provider requires cluster_application_id when auth_type is \"entra\".",
+				"The provider requires cluster_application_id when using Entra authentication.",
 			)
 			return
 		}
@@ -187,6 +191,10 @@ func (p *serviceFabricProvider) Configure(ctx context.Context, req provider.Conf
 		if !config.ClientSecret.IsNull() {
 			options.ClientSecret = config.ClientSecret.ValueString()
 		}
+		if !config.DefaultCredentialType.IsNull() {
+			defaultCredentialType = config.DefaultCredentialType.ValueString()
+			options.DefaultCredentialType = defaultCredentialType
+		}
 
 		auth, err = servicefabric.NewEntraAuthenticator(options)
 		if err != nil {
@@ -196,13 +204,6 @@ func (p *serviceFabricProvider) Configure(ctx context.Context, req provider.Conf
 			)
 			return
 		}
-	default:
-		resp.Diagnostics.AddAttributeError(
-			path.Root("auth_type"),
-			"Unsupported authentication type",
-			fmt.Sprintf("Auth type %q is not supported. Valid values: \"certificate\", \"entra\".", authType),
-		)
-		return
 	}
 
 	if err := auth.ConfigureHTTPClient(httpClient); err != nil {
@@ -226,10 +227,15 @@ func (p *serviceFabricProvider) Configure(ctx context.Context, req provider.Conf
 		return
 	}
 
-	tflog.Debug(ctx, "Service Fabric client configured", map[string]any{
+	logFields := map[string]any{
 		"endpoint": config.Endpoint.ValueString(),
-		"authType": authType,
-	})
+		"authMode": authMode,
+	}
+	if defaultCredentialType != "" {
+		logFields["defaultCredentialType"] = defaultCredentialType
+	}
+
+	tflog.Debug(ctx, "Service Fabric client configured", logFields)
 
 	features := providerFeatures{
 		ApplicationRecreateOnUpgrade: true,

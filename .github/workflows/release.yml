@@ -10,12 +10,13 @@ on:
         description: 'Version to release (e.g., 1.2.3)'
         required: false
 
+permissions:
+  contents: write
+
 jobs:
   terraform-provider-release:
     name: Terraform Provider Release
     uses: hashicorp/ghaction-terraform-provider-release/.github/workflows/community.yml@v4
-    permissions:
-      contents: write
     secrets:
       gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
     with:

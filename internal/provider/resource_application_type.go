@@ -26,6 +26,32 @@ type applicationTypeResource struct {
 	features providerFeatures
 }
 
+func (r *applicationTypeResource) computeID(name, version string) string {
+	if allowApplicationTypeUpdatesEnabled() || r.features.AllowApplicationTypeUpdates {
+		return name
+	}
+	return fmt.Sprintf("%s/%s", name, version)
+}
+
+type featureAwareVersionPlanModifier struct {
+	resource *applicationTypeResource
+}
+
+func (m featureAwareVersionPlanModifier) Description(_ context.Context) string {
+	return "Requires replacement when provider feature allow_application_type_version_updates is disabled."
+}
+
+func (m featureAwareVersionPlanModifier) MarkdownDescription(_ context.Context) string {
+	return "Requires replacement when provider feature `allow_application_type_version_updates` is disabled."
+}
+
+func (m featureAwareVersionPlanModifier) PlanModifyString(ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if allowApplicationTypeUpdatesEnabled() || (m.resource != nil && m.resource.features.AllowApplicationTypeUpdates) {
+		return
+	}
+	stringplanmodifier.RequiresReplace().PlanModifyString(ctx, req, resp)
+}
+
 type applicationTypeResourceModel struct {
 	ID             types.String `tfsdk:"id"`
 	Name           types.String `tfsdk:"name"`
@@ -58,16 +84,16 @@ func (r *applicationTypeResource) Schema(_ context.Context, _ resource.SchemaReq
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"version": rschema.StringAttribute{
-				Required: true,
-				Validators: []validator.String{
-					stringvalidator.LengthAtLeast(1),
-				},
-				Description: "Application type version.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
+		"version": rschema.StringAttribute{
+			Required: true,
+			Validators: []validator.String{
+				stringvalidator.LengthAtLeast(1),
 			},
+			Description: "Application type version.",
+			PlanModifiers: []planmodifier.String{
+				featureAwareVersionPlanModifier{resource: r},
+			},
+		},
 			"package_uri": rschema.StringAttribute{
 				Required:    true,
 				Description: "Service Fabric package URI (SAS URL) pointing to the SFPKG.",
@@ -110,8 +136,15 @@ func (r *applicationTypeResource) Create(ctx context.Context, req resource.Creat
 	}
 
 	if err := r.client.ProvisionApplicationType(ctx, plan.Name.ValueString(), plan.Version.ValueString(), plan.PackageURI.ValueString()); err != nil {
-		resp.Diagnostics.AddError("Provisioning failed", err.Error())
-		return
+		if servicefabric.IsApplicationTypeAlreadyExistsError(err) {
+			tflog.Info(ctx, "Application type version already provisioned", map[string]any{
+				"name":    plan.Name.ValueString(),
+				"version": plan.Version.ValueString(),
+			})
+		} else {
+			resp.Diagnostics.AddError("Provisioning failed", err.Error())
+			return
+		}
 	}
 
 	tflog.Info(ctx, "Provisioned Service Fabric application type", map[string]any{
@@ -119,7 +152,7 @@ func (r *applicationTypeResource) Create(ctx context.Context, req resource.Creat
 		"version": plan.Version.ValueString(),
 	})
 
-	plan.ID = types.StringValue(fmt.Sprintf("%s/%s", plan.Name.ValueString(), plan.Version.ValueString()))
+	plan.ID = types.StringValue(r.computeID(plan.Name.ValueString(), plan.Version.ValueString()))
 
 	if err := r.readIntoState(ctx, &plan); err != nil {
 		resp.Diagnostics.AddError("Failed to read application type", err.Error())
@@ -154,9 +187,7 @@ func (r *applicationTypeResource) readIntoState(ctx context.Context, state *appl
 		return err
 	}
 	state.Status = types.StringValue(info.Status)
-	if state.ID.IsNull() || state.ID.ValueString() == "" {
-		state.ID = types.StringValue(fmt.Sprintf("%s/%s", state.Name.ValueString(), state.Version.ValueString()))
-	}
+	state.ID = types.StringValue(r.computeID(state.Name.ValueString(), state.Version.ValueString()))
 	if state.RetainVersions.IsNull() || state.RetainVersions.IsUnknown() {
 		state.RetainVersions = types.BoolValue(false)
 	}
@@ -172,13 +203,23 @@ func (r *applicationTypeResource) Update(ctx context.Context, req resource.Updat
 		return
 	}
 
+	if plan.RetainVersions.IsNull() || plan.RetainVersions.IsUnknown() {
+		plan.RetainVersions = state.RetainVersions
+	}
+	if plan.Status.IsNull() || plan.Status.IsUnknown() {
+		plan.Status = state.Status
+	}
+	if plan.ID.IsNull() || plan.ID.IsUnknown() {
+		plan.ID = state.ID
+	}
+
 	versionChanged := plan.Version.ValueString() != state.Version.ValueString()
 	packageChanged := plan.PackageURI.ValueString() != state.PackageURI.ValueString()
 
-	if versionChanged {
+	if versionChanged && !r.features.AllowApplicationTypeUpdates {
 		resp.Diagnostics.AddError(
 			"Application type version change requires replacement",
-			"Terraform planned an in-place update but version changes are handled via resource replacement. Set `lifecycle { create_before_destroy = true }` if you need zero-downtime upgrades.",
+			"Terraform planned an in-place update but version changes are handled via resource replacement. Enable provider setting `allow_application_type_version_updates` to permit in-place updates, or set `lifecycle { create_before_destroy = true }` for zero-downtime upgrades.",
 		)
 		return
 	}
@@ -189,11 +230,18 @@ func (r *applicationTypeResource) Update(ctx context.Context, req resource.Updat
 	}
 
 	if err := r.client.ProvisionApplicationType(ctx, plan.Name.ValueString(), plan.Version.ValueString(), plan.PackageURI.ValueString()); err != nil {
-		resp.Diagnostics.AddError("Provisioning failed", err.Error())
-		return
+		if servicefabric.IsApplicationTypeAlreadyExistsError(err) {
+			tflog.Info(ctx, "Application type version already provisioned", map[string]any{
+				"name":    plan.Name.ValueString(),
+				"version": plan.Version.ValueString(),
+			})
+		} else {
+			resp.Diagnostics.AddError("Provisioning failed", err.Error())
+			return
+		}
 	}
 
-	plan.ID = types.StringValue(fmt.Sprintf("%s/%s", plan.Name.ValueString(), plan.Version.ValueString()))
+	plan.ID = types.StringValue(r.computeID(plan.Name.ValueString(), plan.Version.ValueString()))
 
 	if err := r.readIntoState(ctx, &plan); err != nil {
 		resp.Diagnostics.AddError("Failed to read application type", err.Error())

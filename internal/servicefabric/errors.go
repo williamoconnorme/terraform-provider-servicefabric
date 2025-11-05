@@ -41,6 +41,16 @@ func IsApplicationTypeInUseError(err error) bool {
 	return false
 }
 
+// IsApplicationTypeAlreadyExistsError reports whether the error corresponds to an
+// attempt to provision an application type version that already exists.
+func IsApplicationTypeAlreadyExistsError(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == http.StatusConflict && apiErr.Code == "FABRIC_E_APPLICATION_TYPE_ALREADY_EXISTS"
+	}
+	return false
+}
+
 // IsApplicationUpgradeInProgressError reports whether an upgrade is already in progress.
 func IsApplicationUpgradeInProgressError(err error) bool {
 	var apiErr *APIError

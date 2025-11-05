@@ -54,6 +54,7 @@ The following arguments are supported in the provider block:
 - `tenant_id`, `client_id`, `client_secret` (Optional) Entra credential details.
 - `default_credential_type` (Optional) Restrict the DefaultAzureCredential chain to a single credential (`default`, `environment`, `workload_identity`, `managed_identity`, `azure_cli`, `azure_developer_cli`, `azure_powershell`).
 - `application_recreate_on_upgrade` (Optional) When true, replacements of existing applications trigger an upgrade with ForceRestart instead of deleting and recreating the application.
+- `allow_application_type_version_updates` (Optional) Permit in-place updates to `servicefabric_application_type` versions. When true, Terraform will show an update instead of a replacement, even though the previous version remains registered unless manually unprovisioned.
 
 ## Resources
 

@@ -46,10 +46,12 @@ provider "servicefabric" {
   client_id               = "22222222-2222-2222-2222-222222222222"
   client_secret           = var.service_principal_secret
   # default_credential_type = "azure_cli" # Optional override of the DefaultAzureCredential chain
+  # allow_application_type_version_updates = true
 }
 ```
 
 Optional provider argument `application_recreate_on_upgrade` (default `true`) controls whether replacing an existing application triggers a Service Fabric upgrade with ForceRestart instead of deleting the application.
+Set `allow_application_type_version_updates = true` to enable in-place updates of `servicefabric_application_type` versions during Terraform apply (the previous version remains registered in the cluster unless you unprovision it manually).
 
 ### Authentication Notes
 
@@ -150,6 +152,7 @@ provider "servicefabric" {
   client_id               = "22222222-2222-2222-2222-222222222222"
   client_secret           = var.service_principal_secret
   # default_credential_type = "managed_identity"
+  # allow_application_type_version_updates = true
 }
 
 resource "servicefabric_application_type" "sample" {

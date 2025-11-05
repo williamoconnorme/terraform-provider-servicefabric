@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -39,13 +40,17 @@ type serviceFabricProviderModel struct {
 	ClientCertificatePath        types.String `tfsdk:"client_certificate_path"`
 	ClientCertificatePassword    types.String `tfsdk:"client_certificate_password"`
 	ApplicationRecreateOnUpgrade types.Bool   `tfsdk:"application_recreate_on_upgrade"`
+	AllowApplicationTypeUpdates  types.Bool   `tfsdk:"allow_application_type_version_updates"`
 }
 
 type serviceFabricProvider struct{}
 
 type providerFeatures struct {
 	ApplicationRecreateOnUpgrade bool
+	AllowApplicationTypeUpdates  bool
 }
+
+var allowApplicationTypeUpdatesFlag atomic.Bool
 
 type providerData struct {
 	Client   *servicefabric.Client
@@ -105,6 +110,10 @@ func (p *serviceFabricProvider) Schema(_ context.Context, _ provider.SchemaReque
 			"application_recreate_on_upgrade": providerschema.BoolAttribute{
 				Optional:    true,
 				Description: "When true, replacements of existing applications trigger a Service Fabric upgrade with ForceRestart instead of deleting and recreating the application. Defaults to true.",
+			},
+			"allow_application_type_version_updates": providerschema.BoolAttribute{
+				Optional:    true,
+				Description: "When true, version changes for servicefabric_application_type are applied in-place instead of forcing Terraform replacement. Use with caution: Terraform will treat the existing resource as updated even though the old version may remain registered in the cluster.",
 			},
 		},
 	}
@@ -243,6 +252,10 @@ func (p *serviceFabricProvider) Configure(ctx context.Context, req provider.Conf
 	if !config.ApplicationRecreateOnUpgrade.IsNull() && !config.ApplicationRecreateOnUpgrade.IsUnknown() {
 		features.ApplicationRecreateOnUpgrade = config.ApplicationRecreateOnUpgrade.ValueBool()
 	}
+	if !config.AllowApplicationTypeUpdates.IsNull() && !config.AllowApplicationTypeUpdates.IsUnknown() {
+		features.AllowApplicationTypeUpdates = config.AllowApplicationTypeUpdates.ValueBool()
+	}
+	allowApplicationTypeUpdatesFlag.Store(features.AllowApplicationTypeUpdates)
 
 	providerData := &providerData{
 		Client:   client,
@@ -251,6 +264,10 @@ func (p *serviceFabricProvider) Configure(ctx context.Context, req provider.Conf
 
 	resp.DataSourceData = providerData
 	resp.ResourceData = providerData
+}
+
+func allowApplicationTypeUpdatesEnabled() bool {
+	return allowApplicationTypeUpdatesFlag.Load()
 }
 
 // Resources returns the resources implemented by the provider.

@@ -21,7 +21,8 @@ The following arguments are supported:
 - `name` (Required) - Application type name as defined in the application
   manifest. Changing this recreates the resource.
 - `version` (Required) - Application type version. Changing this recreates the
-  resource.
+  resource unless the provider option `allow_application_type_version_updates`
+  is enabled.
 - `package_uri` (Required) - HTTPS URI to the `.sfpkg` package. Usually a SAS
   URL in Azure Blob Storage. Changing this recreates the resource.
 - `retain_versions` (Optional) - Defaults to `false`. When enabled the resource
@@ -34,6 +35,11 @@ In addition to the arguments above, the following attributes are exported:
 
 - `id` - Combination of `name/version`.
 - `status` - Provisioning status reported by the cluster.
+
+> **Note:** Enabling the provider option `allow_application_type_version_updates`
+> allows Terraform to update the `version` and `package_uri` in place. The
+> previous version remains registered in the cluster unless you unprovision it
+> manually or disable `retain_versions` and destroy the resource.
 
 ## Import
 

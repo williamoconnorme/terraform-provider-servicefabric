@@ -119,12 +119,27 @@ func (c *Client) doRequest(ctx context.Context, method, path string, query url.V
 	if resp.StatusCode >= 400 {
 		defer resp.Body.Close()
 		b, _ := io.ReadAll(resp.Body)
-		return nil, &APIError{
+		apiErr := &APIError{
 			Method:     method,
 			Path:       path,
 			StatusCode: resp.StatusCode,
 			Message:    strings.TrimSpace(string(b)),
 		}
+		var fabricErr struct {
+			Error struct {
+				Code    string `json:"Code"`
+				Message string `json:"Message"`
+			} `json:"Error"`
+		}
+		if err := json.Unmarshal(b, &fabricErr); err == nil {
+			if fabricErr.Error.Code != "" {
+				apiErr.Code = fabricErr.Error.Code
+			}
+			if fabricErr.Error.Message != "" {
+				apiErr.Message = strings.TrimSpace(fabricErr.Error.Message)
+			}
+		}
+		return nil, apiErr
 	}
 
 	return resp, nil
@@ -369,6 +384,126 @@ func (c *Client) DeleteApplication(ctx context.Context, name string, force bool)
 	return nil
 }
 
+const (
+	upgradeKindRolling              = "Rolling"
+	rollingUpgradeModeUnmonitored   = "UnmonitoredAuto"
+	upgradeStateRollingForwardDone  = "RollingForwardCompleted"
+	upgradeStateRollingBackDone     = "RollingBackCompleted"
+	upgradeStateRollingBackProgress = "RollingBackInProgress"
+	upgradeStateFailed              = "Failed"
+)
+
+// ApplicationUpgradeDescription describes an application upgrade request.
+type ApplicationUpgradeDescription struct {
+	Name                         string               `json:"Name"`
+	TargetApplicationTypeVersion string               `json:"TargetApplicationTypeVersion"`
+	ParameterMap                 map[string]string    `json:"-"`
+	Parameters                   []NameValueParameter `json:"Parameters,omitempty"`
+	UpgradeKind                  string               `json:"UpgradeKind"`
+	RollingUpgradeMode           string               `json:"RollingUpgradeMode,omitempty"`
+	ForceRestart                 bool                 `json:"ForceRestart,omitempty"`
+}
+
+func (d *ApplicationUpgradeDescription) prepare() {
+	if len(d.Parameters) == 0 && len(d.ParameterMap) > 0 {
+		d.Parameters = mapToParameterList(d.ParameterMap)
+	}
+}
+
+type applicationUpgradeProgress struct {
+	UpgradeState         string `json:"UpgradeState"`
+	FailureReason        string `json:"FailureReason"`
+	UpgradeStatusDetails string `json:"UpgradeStatusDetails"`
+}
+
+// UpgradeApplication triggers a rolling upgrade and waits for completion.
+func (c *Client) UpgradeApplication(ctx context.Context, desc ApplicationUpgradeDescription) error {
+	if desc.Name == "" {
+		return fmt.Errorf("application name required")
+	}
+	desc.prepare()
+	if desc.UpgradeKind == "" {
+		desc.UpgradeKind = upgradeKindRolling
+	}
+	if desc.RollingUpgradeMode == "" {
+		desc.RollingUpgradeMode = rollingUpgradeModeUnmonitored
+	}
+
+	if err := c.startApplicationUpgrade(ctx, desc); err != nil {
+		if IsApplicationUpgradeInProgressError(err) {
+			if waitErr := c.waitForApplicationUpgrade(ctx, desc.Name); waitErr != nil {
+				return waitErr
+			}
+			if err := c.startApplicationUpgrade(ctx, desc); err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+	}
+	return c.waitForApplicationUpgrade(ctx, desc.Name)
+}
+
+func (c *Client) startApplicationUpgrade(ctx context.Context, desc ApplicationUpgradeDescription) error {
+	appID := url.PathEscape(applicationIDFromName(desc.Name))
+	endpoint := fmt.Sprintf("/Applications/%s/$/Upgrade", appID)
+	resp, err := c.doRequest(ctx, http.MethodPost, endpoint, nil, desc)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	return nil
+}
+
+func (c *Client) waitForApplicationUpgrade(ctx context.Context, name string) error {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		progress, err := c.getApplicationUpgradeProgress(ctx, name)
+		if err != nil {
+			if IsNotFoundError(err) {
+				return nil
+			}
+			return err
+		}
+
+		switch progress.UpgradeState {
+		case upgradeStateRollingForwardDone, "":
+			return nil
+		case upgradeStateRollingBackDone, upgradeStateFailed:
+			return fmt.Errorf("application upgrade failed: state=%s details=%s", progress.UpgradeState, progress.UpgradeStatusDetails)
+		case upgradeStateRollingBackProgress, "RollingForwardPending", "RollingForwardInProgress", "Invalid":
+			// continue polling
+		default:
+			// Unknown state, continue polling but guard against hangs.
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func (c *Client) getApplicationUpgradeProgress(ctx context.Context, name string) (*applicationUpgradeProgress, error) {
+	appID := url.PathEscape(applicationIDFromName(name))
+	endpoint := fmt.Sprintf("/Applications/%s/$/GetUpgradeProgress", appID)
+	resp, err := c.doRequest(ctx, http.MethodGet, endpoint, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var progress applicationUpgradeProgress
+	if err := json.NewDecoder(resp.Body).Decode(&progress); err != nil {
+		return nil, err
+	}
+	return &progress, nil
+}
+
 // GetApplication retrieves application information.
 func (c *Client) GetApplication(ctx context.Context, name string) (*ApplicationInfo, error) {
 	appID := url.PathEscape(applicationIDFromName(name))
@@ -482,15 +617,7 @@ type ApplicationDescription struct {
 
 func (a *ApplicationDescription) prepare() {
 	if len(a.ParameterList) == 0 && len(a.ParameterMap) > 0 {
-		keys := make([]string, 0, len(a.ParameterMap))
-		for k := range a.ParameterMap {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			v := a.ParameterMap[k]
-			a.ParameterList = append(a.ParameterList, NameValueParameter{Key: k, Value: v})
-		}
+		a.ParameterList = mapToParameterList(a.ParameterMap)
 	}
 }
 
@@ -526,6 +653,22 @@ func ParameterListToMap(list []NameValueParameter) map[string]string {
 		out[item.Key] = item.Value
 	}
 	return out
+}
+
+func mapToParameterList(m map[string]string) []NameValueParameter {
+	if len(m) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	result := make([]NameValueParameter, 0, len(keys))
+	for _, k := range keys {
+		result = append(result, NameValueParameter{Key: k, Value: m[k]})
+	}
+	return result
 }
 
 func (a ApplicationInfo) ParameterEntries() []NameValueParameter {

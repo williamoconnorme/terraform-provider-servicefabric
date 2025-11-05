@@ -11,6 +11,7 @@ type APIError struct {
 	Method     string
 	Path       string
 	StatusCode int
+	Code       string
 	Message    string
 }
 
@@ -26,6 +27,25 @@ func IsNotFoundError(err error) bool {
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
 		return apiErr.StatusCode == http.StatusNotFound
+	}
+	return false
+}
+
+// IsApplicationTypeInUseError reports whether the error corresponds to a conflict
+// because an application type version is still in use.
+func IsApplicationTypeInUseError(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == http.StatusConflict && apiErr.Code == "FABRIC_E_APPLICATION_TYPE_IN_USE"
+	}
+	return false
+}
+
+// IsApplicationUpgradeInProgressError reports whether an upgrade is already in progress.
+func IsApplicationUpgradeInProgressError(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == http.StatusConflict && apiErr.Code == "FABRIC_E_APPLICATION_UPGRADE_IN_PROGRESS"
 	}
 	return false
 }

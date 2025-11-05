@@ -67,6 +67,9 @@ resource "servicefabric_application_type" "sample" {
   version     = "1.0.0"
   package_uri = "https://storage.example.net/apps/Contoso.SampleAppType_1.0.0.sfpkg?..."
 }
+
+- Optional argument `retain_versions` can be set to `true` when you want to keep
+  older versions registered with the cluster after destroy.
 ```
 
 ### `servicefabric_application`

@@ -18,19 +18,22 @@ resource "servicefabric_application_type" "sample" {
 
 The following arguments are supported:
 
-- `name` (Required) – Application type name as defined in the application
+- `name` (Required) - Application type name as defined in the application
   manifest. Changing this recreates the resource.
-- `version` (Required) – Application type version. Changing this recreates the
+- `version` (Required) - Application type version. Changing this recreates the
   resource.
-- `package_uri` (Required) – HTTPS URI to the `.sfpkg` package. Usually a SAS
+- `package_uri` (Required) - HTTPS URI to the `.sfpkg` package. Usually a SAS
   URL in Azure Blob Storage. Changing this recreates the resource.
+- `retain_versions` (Optional) - Defaults to `false`. When enabled the resource
+  skips unprovisioning older versions so Service Fabric can retire them after
+  application upgrades complete.
 
 ## Attribute Reference
 
 In addition to the arguments above, the following attributes are exported:
 
-- `id` – Combination of `name/version`.
-- `status` – Provisioning status reported by the cluster.
+- `id` - Combination of `name/version`.
+- `status` - Provisioning status reported by the cluster.
 
 ## Import
 
@@ -39,3 +42,4 @@ Application types can be imported using `name/version`, for example:
 ```shell
 terraform import servicefabric_application_type.sample Contoso.SampleAppType/1.0.0
 ```
+

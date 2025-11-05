@@ -22,7 +22,8 @@ var _ resource.Resource = &applicationTypeResource{}
 var _ resource.ResourceWithImportState = &applicationTypeResource{}
 
 type applicationTypeResource struct {
-	client *servicefabric.Client
+	client   *servicefabric.Client
+	features providerFeatures
 }
 
 type applicationTypeResourceModel struct {
@@ -89,7 +90,12 @@ func (r *applicationTypeResource) Configure(_ context.Context, req resource.Conf
 	if req.ProviderData == nil {
 		return
 	}
-	r.client = req.ProviderData.(*servicefabric.Client)
+	data, ok := req.ProviderData.(*providerData)
+	if !ok || data == nil {
+		return
+	}
+	r.client = data.Client
+	r.features = data.Features
 }
 
 func (r *applicationTypeResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {

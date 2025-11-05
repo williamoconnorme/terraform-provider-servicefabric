@@ -38,8 +38,8 @@ In addition to the arguments above, the following attributes are exported:
 
 ## Import
 
-Applications can be imported by name:
+Applications can be imported by composite identifier or by name (the latter requires `type_name` in configuration):
 
 ```shell
-terraform import servicefabric_application.sample fabric:/Contoso.Sample
+terraform import servicefabric_application.sample Contoso.SampleAppType|fabric:/Contoso.Sample
 ```

@@ -27,18 +27,28 @@ func New() provider.Provider {
 
 // serviceFabricProviderModel defines the provider configuration model.
 type serviceFabricProviderModel struct {
-	Endpoint                  types.String `tfsdk:"endpoint"`
-	SkipTLSVerify             types.Bool   `tfsdk:"skip_tls_verify"`
-	AuthType                  types.String `tfsdk:"auth_type"`
-	ClusterApplicationID      types.String `tfsdk:"cluster_application_id"`
-	TenantID                  types.String `tfsdk:"tenant_id"`
-	ClientID                  types.String `tfsdk:"client_id"`
-	ClientSecret              types.String `tfsdk:"client_secret"`
-	ClientCertificatePath     types.String `tfsdk:"client_certificate_path"`
-	ClientCertificatePassword types.String `tfsdk:"client_certificate_password"`
+	Endpoint                     types.String `tfsdk:"endpoint"`
+	SkipTLSVerify                types.Bool   `tfsdk:"skip_tls_verify"`
+	AuthType                     types.String `tfsdk:"auth_type"`
+	ClusterApplicationID         types.String `tfsdk:"cluster_application_id"`
+	TenantID                     types.String `tfsdk:"tenant_id"`
+	ClientID                     types.String `tfsdk:"client_id"`
+	ClientSecret                 types.String `tfsdk:"client_secret"`
+	ClientCertificatePath        types.String `tfsdk:"client_certificate_path"`
+	ClientCertificatePassword    types.String `tfsdk:"client_certificate_password"`
+	ApplicationRecreateOnUpgrade types.Bool   `tfsdk:"application_recreate_on_upgrade"`
 }
 
 type serviceFabricProvider struct{}
+
+type providerFeatures struct {
+	ApplicationRecreateOnUpgrade bool
+}
+
+type providerData struct {
+	Client   *servicefabric.Client
+	Features providerFeatures
+}
 
 // Metadata returns the provider type name.
 func (p *serviceFabricProvider) Metadata(_ context.Context, _ provider.MetadataRequest, resp *provider.MetadataResponse) {
@@ -86,6 +96,10 @@ func (p *serviceFabricProvider) Schema(_ context.Context, _ provider.SchemaReque
 				Optional:    true,
 				Sensitive:   true,
 				Description: "Password for the client certificate when using certificate authentication.",
+			},
+			"application_recreate_on_upgrade": providerschema.BoolAttribute{
+				Optional:    true,
+				Description: "When true, replacements of existing applications trigger a Service Fabric upgrade with ForceRestart instead of deleting and recreating the application. Defaults to true.",
 			},
 		},
 	}
@@ -217,8 +231,20 @@ func (p *serviceFabricProvider) Configure(ctx context.Context, req provider.Conf
 		"authType": authType,
 	})
 
-	resp.DataSourceData = client
-	resp.ResourceData = client
+	features := providerFeatures{
+		ApplicationRecreateOnUpgrade: true,
+	}
+	if !config.ApplicationRecreateOnUpgrade.IsNull() && !config.ApplicationRecreateOnUpgrade.IsUnknown() {
+		features.ApplicationRecreateOnUpgrade = config.ApplicationRecreateOnUpgrade.ValueBool()
+	}
+
+	providerData := &providerData{
+		Client:   client,
+		Features: features,
+	}
+
+	resp.DataSourceData = providerData
+	resp.ResourceData = providerData
 }
 
 // Resources returns the resources implemented by the provider.

@@ -17,7 +17,8 @@ var _ resource.Resource = &applicationResource{}
 var _ resource.ResourceWithImportState = &applicationResource{}
 
 type applicationResource struct {
-	client *servicefabric.Client
+	client   *servicefabric.Client
+	features providerFeatures
 }
 
 type applicationResourceModel struct {
@@ -79,7 +80,12 @@ func (r *applicationResource) Configure(_ context.Context, req resource.Configur
 	if req.ProviderData == nil {
 		return
 	}
-	r.client = req.ProviderData.(*servicefabric.Client)
+	data, ok := req.ProviderData.(*providerData)
+	if !ok || data == nil {
+		return
+	}
+	r.client = data.Client
+	r.features = data.Features
 }
 
 func (r *applicationResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -106,8 +112,26 @@ func (r *applicationResource) Create(ctx context.Context, req resource.CreateReq
 	}
 
 	if err := r.client.CreateApplication(ctx, desc); err != nil {
-		resp.Diagnostics.AddError("Failed to create application", err.Error())
-		return
+		if r.features.ApplicationRecreateOnUpgrade && servicefabric.IsApplicationAlreadyExistsError(err) {
+			tflog.Info(ctx, "Existing Service Fabric application detected, initiating upgrade instead of create", map[string]any{
+				"name":         plan.Name.ValueString(),
+				"type_name":    plan.TypeName.ValueString(),
+				"type_version": plan.TypeVersion.ValueString(),
+			})
+			upgradeDesc := servicefabric.ApplicationUpgradeDescription{
+				Name:                         plan.Name.ValueString(),
+				TargetApplicationTypeVersion: plan.TypeVersion.ValueString(),
+				ParameterMap:                 paramMap,
+				ForceRestart:                 true,
+			}
+			if upgradeErr := r.client.UpgradeApplication(ctx, upgradeDesc); upgradeErr != nil {
+				resp.Diagnostics.AddError("Failed to upgrade existing application", upgradeErr.Error())
+				return
+			}
+		} else {
+			resp.Diagnostics.AddError("Failed to create application", err.Error())
+			return
+		}
 	}
 
 	tflog.Info(ctx, "Created Service Fabric application", map[string]any{

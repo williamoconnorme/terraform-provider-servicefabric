@@ -9,6 +9,7 @@ This repository implements a Terraform provider for managing Service Fabric appl
   - Entra ID (Azure AD) tokens using client secret credentials or the default Azure credential chain (Azure CLI, Managed Identity, workload identity, etc.).
 - Manage application types by provisioning and unprovisioning `.sfpkg` packages.
 - Deploy and manage Service Fabric applications, including parameter updates.
+- Automatically orchestrate Service Fabric upgrades (with optional force-recreate behavior) when replacing existing applications.
 - Query existing application types and applications via Terraform data sources.
 
 ## Building
@@ -50,6 +51,8 @@ provider "servicefabric" {
 }
 ```
 
+Optional provider argument `application_recreate_on_upgrade` (default `true`) controls whether replacing an existing application triggers a Service Fabric upgrade with ForceRestart instead of deleting the application.
+
 ### Authentication Notes
 
 - **Certificate** authentication expects a PKCS#12 (`.pfx`) file containing the client certificate and key.
@@ -67,10 +70,10 @@ resource "servicefabric_application_type" "sample" {
   version     = "1.0.0"
   package_uri = "https://storage.example.net/apps/Contoso.SampleAppType_1.0.0.sfpkg?..."
 }
-
-- Optional argument `retain_versions` can be set to `true` when you want to keep
-  older versions registered with the cluster after destroy.
 ```
+
+Optional argument `retain_versions = true` keeps older versions registered with the cluster after destroy.
+
 
 ### `servicefabric_application`
 

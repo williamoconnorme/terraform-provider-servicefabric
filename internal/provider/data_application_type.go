@@ -102,7 +102,11 @@ func (d *applicationTypeDataSource) Configure(_ context.Context, req datasource.
 	if req.ProviderData == nil {
 		return
 	}
-	d.client = req.ProviderData.(*servicefabric.Client)
+	data, ok := req.ProviderData.(*providerData)
+	if !ok || data == nil {
+		return
+	}
+	d.client = data.Client
 }
 
 func (d *applicationTypeDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {

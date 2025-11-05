@@ -49,6 +49,7 @@ The following arguments are supported in the provider block:
 - `cluster_application_id` (Required for `entra`) Application ID used to request
   tokens from Entra ID.
 - `tenant_id`, `client_id`, `client_secret` (Optional) Entra credential details.
+- `application_recreate_on_upgrade` (Optional) When true, replacements of existing applications trigger an upgrade with ForceRestart instead of deleting and recreating the application.
 
 ## Resources
 

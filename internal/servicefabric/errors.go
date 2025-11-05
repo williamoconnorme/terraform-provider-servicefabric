@@ -49,3 +49,12 @@ func IsApplicationUpgradeInProgressError(err error) bool {
 	}
 	return false
 }
+
+// IsApplicationAlreadyExistsError reports whether an application already exists.
+func IsApplicationAlreadyExistsError(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == http.StatusConflict && apiErr.Code == "FABRIC_E_APPLICATION_ALREADY_EXISTS"
+	}
+	return false
+}

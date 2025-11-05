@@ -195,8 +195,3 @@ output "application_types" {
   value = data.servicefabric_application_type.all_types.application_types
 }
 ```
-
-## Next Steps
-
-- Implement acceptance tests using the Terraform Plugin Testing framework and a mock cluster endpoint.
-- Publish the provider to the Terraform Registry once ready for distribution.

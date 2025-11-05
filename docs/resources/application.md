@@ -16,6 +16,27 @@ resource "servicefabric_application" "sample" {
     Environment   = "dev"
     InstanceCount = "3"
   }
+
+  application_capacity {
+    minimum_nodes = 2
+    maximum_nodes = 5
+
+    application_metrics {
+      name                    = "CustomMetric"
+      maximum_capacity        = 50
+      reservation_capacity    = 10
+      total_application_capacity = 250
+    }
+  }
+
+  managed_application_identity {
+    token_service_endpoint = "https://cluster.example.com:19080/TokenService"
+
+    identities = [
+      "MyUserAssignedIdentity",
+      "00000000-0000-0000-0000-000000000000",
+    ]
+  }
 }
 ```
 
@@ -27,6 +48,27 @@ resource "servicefabric_application" "sample" {
 - `type_version` (Required) – Application type version to deploy.
 - `parameters` (Optional) – Map of parameter overrides defined in the
   application manifest.
+- `application_capacity` (Optional) – Nested block defining capacity
+  reservations and limits for the application:
+  - `minimum_nodes` (Optional) – Minimum number of nodes where capacity is
+    reserved.
+  - `maximum_nodes` (Optional) – Maximum number of nodes where capacity can be
+    reserved (set to `0` for no limit).
+  - `application_metrics` (Optional) – List of custom metric capacity settings.
+    Each entry supports:
+    - `name` (Required) – Metric name.
+    - `maximum_capacity` (Optional) – Maximum per-node capacity for the metric
+      (set to `0` for no limit).
+    - `reservation_capacity` (Optional) – Reserved per-node capacity for the
+      metric.
+    - `total_application_capacity` (Optional) – Total cluster-wide capacity for
+      the metric (set to `0` for no limit).
+- `managed_application_identity` (Optional) – Nested block configuring managed
+  identities associated with the application:
+  - `token_service_endpoint` (Optional) – Token service endpoint used for
+    identity federation.
+  - `identities` (Optional) – List of managed identity resource names or
+    principal IDs (GUIDs) to associate with the application.
 
 ## Attribute Reference
 

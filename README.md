@@ -9,6 +9,7 @@ This repository implements a Terraform provider for managing Service Fabric appl
   - Entra ID (Azure AD) tokens using client secret credentials or the default Azure credential chain (Azure CLI, Managed Identity, workload identity, etc.).
 - Manage application types by provisioning and unprovisioning `.sfpkg` packages.
 - Deploy and manage Service Fabric applications, including parameter updates.
+- Configure application capacity constraints and managed identities for applications.
 - Automatically orchestrate Service Fabric upgrades (with optional force-recreate behavior) when replacing existing applications.
 - Query existing application types and applications via Terraform data sources.
 
@@ -87,6 +88,27 @@ resource "servicefabric_application" "sample" {
     AzureSubscriptionId                 = "00000000-0000-0000-0000-000000000000"
     ServiceFabricClusterName            = "sf-contoso-dev"
   }
+
+  application_capacity {
+    minimum_nodes = 2
+    maximum_nodes = 4
+
+    application_metrics {
+      name                       = "ApiBudget"
+      maximum_capacity           = 25
+      reservation_capacity       = 5
+      total_application_capacity = 80
+    }
+  }
+
+  managed_application_identity {
+    token_service_endpoint = "https://cluster.example.com:19080/TokenService"
+
+    identities = [
+      "MyUserAssignedIdentity",
+      "00000000-0000-0000-0000-000000000000",
+    ]
+  }
 }
 ```
 
@@ -145,6 +167,22 @@ resource "servicefabric_application" "sample" {
     Environment          = "dev"
     InstanceCount        = "3"
     MonitoringConnection = "InstrumentationKey=..."
+  }
+
+  application_capacity {
+    minimum_nodes = 1
+    maximum_nodes = 3
+
+    application_metrics {
+      name                       = "WorkerLoad"
+      maximum_capacity           = 10
+      reservation_capacity       = 4
+      total_application_capacity = 20
+    }
+  }
+
+  managed_application_identity {
+    identities = ["MySystemAssignedIdentity"]
   }
 }
 

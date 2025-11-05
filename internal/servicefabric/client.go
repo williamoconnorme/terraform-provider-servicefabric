@@ -613,12 +613,39 @@ type ApplicationDescription struct {
 	TypeVersion   string               `json:"TypeVersion"`
 	ParameterMap  map[string]string    `json:"-"`
 	ParameterList []NameValueParameter `json:"ParameterList,omitempty"`
+	ApplicationCapacity         *ApplicationCapacityDescription         `json:"ApplicationCapacity,omitempty"`
+	ManagedApplicationIdentity  *ManagedApplicationIdentityDescription  `json:"ManagedApplicationIdentity,omitempty"`
 }
 
 func (a *ApplicationDescription) prepare() {
 	if len(a.ParameterList) == 0 && len(a.ParameterMap) > 0 {
 		a.ParameterList = mapToParameterList(a.ParameterMap)
 	}
+}
+
+// ApplicationCapacityDescription captures Service Fabric application capacity settings.
+type ApplicationCapacityDescription struct {
+	MinimumNodes       *int64                         `json:"MinimumNodes,omitempty"`
+	MaximumNodes       *int64                         `json:"MaximumNodes,omitempty"`
+	ApplicationMetrics []ApplicationMetricDescription `json:"ApplicationMetrics,omitempty"`
+}
+
+// ApplicationMetricDescription configures capacity metrics for an application.
+type ApplicationMetricDescription struct {
+	Name                   string `json:"Name,omitempty"`
+	MaximumCapacity        *int64 `json:"MaximumCapacity,omitempty"`
+	ReservationCapacity    *int64 `json:"ReservationCapacity,omitempty"`
+	TotalApplicationCapacity *int64 `json:"TotalApplicationCapacity,omitempty"`
+}
+
+type ManagedApplicationIdentityDescription struct {
+	TokenServiceEndpoint string                       `json:"TokenServiceEndpoint,omitempty"`
+	IdentityRefs         []ManagedApplicationIdentity `json:"ManagedIdentities,omitempty"`
+}
+
+type ManagedApplicationIdentity struct {
+	Name        string `json:"Name,omitempty"`
+	PrincipalID string `json:"PrincipalId,omitempty"`
 }
 
 // ApplicationInfo represents an application instance.
@@ -631,6 +658,8 @@ type ApplicationInfo struct {
 	ParameterList []NameValueParameter `json:"ParameterList"`
 	Status        string               `json:"Status"`
 	HealthState   string               `json:"HealthState"`
+	ManagedApplicationIdentity *ManagedApplicationIdentityDescription `json:"ManagedApplicationIdentity,omitempty"`
+	ApplicationCapacity        *ApplicationCapacityDescription        `json:"ApplicationCapacity,omitempty"`
 }
 
 type applicationInfoList struct {

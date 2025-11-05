@@ -62,10 +62,10 @@ provider "servicefabric" {
 Registers an application type version from an external package URL:
 
 ```hcl
-resource "servicefabric_application_type" "platform" {
-  name        = "OddsFactory.Platform.InfrastructureType"
-  version     = "1.0.0.20251014.1"
-  package_uri = "https://.../OddsFactory.Platform.InfrastructureType_1.0.0.20251014.1.sfpkg?..."
+resource "servicefabric_application_type" "sample" {
+  name        = "Contoso.SampleAppType"
+  version     = "1.0.0"
+  package_uri = "https://storage.example.net/apps/Contoso.SampleAppType_1.0.0.sfpkg?..."
 }
 ```
 
@@ -74,15 +74,15 @@ resource "servicefabric_application_type" "platform" {
 Creates or updates an application instance:
 
 ```hcl
-resource "servicefabric_application" "platform" {
-  name         = "fabric:/OddsFactory.Platform.Infrastructure"
-  type_name    = servicefabric_application_type.platform.name
-  type_version = servicefabric_application_type.platform.version
+resource "servicefabric_application" "sample" {
+  name         = "fabric:/Contoso.Sample"
+  type_name    = servicefabric_application_type.sample.name
+  type_version = servicefabric_application_type.sample.version
 
   parameters = {
     ApplicationInsightsConnectionString = "InstrumentationKey=..."
-    AzureSubscriptionId                 = "42dfe628-ceea-4644-a2ab-bf6e46df6092"
-    ServiceFabricClusterName            = "sf-oddsfactory-gl-devtest"
+    AzureSubscriptionId                 = "00000000-0000-0000-0000-000000000000"
+    ServiceFabricClusterName            = "sf-contoso-dev"
   }
 }
 ```
@@ -90,13 +90,13 @@ resource "servicefabric_application" "platform" {
 ## Data Sources
 
 ```hcl
-data "servicefabric_application_type" "platform" {
-  name    = "OddsFactory.Platform.InfrastructureType"
-  version = "1.0.0.20251014.1"
+data "servicefabric_application_type" "sample" {
+  name    = "Contoso.SampleAppType"
+  version = "1.0.0"
 }
 
-data "servicefabric_application" "platform" {
-  name = "fabric:/OddsFactory.Platform.Infrastructure"
+data "servicefabric_application" "sample" {
+  name = "fabric:/Contoso.Sample"
 }
 ```
 

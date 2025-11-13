@@ -11,7 +11,7 @@ This repository implements a Terraform provider for managing Service Fabric appl
 - Deploy and manage Service Fabric applications, including parameter updates.
 - Configure application capacity constraints and managed identities for applications.
 - Automatically orchestrate Service Fabric upgrades (with optional force-recreate behavior) when replacing existing applications.
-- Query existing application types and applications via Terraform data sources.
+- Query existing application types, services, and applications via Terraform data sources.
 
 ## Building
 
@@ -124,6 +124,17 @@ data "servicefabric_application_type" "sample" {
 
 data "servicefabric_application" "sample" {
   name = "fabric:/Contoso.Sample"
+}
+
+data "servicefabric_service_type" "actor" {
+  application_type_name    = "Contoso.SampleAppType"
+  application_type_version = "1.0.0"
+  service_type_name        = "Actor1ActorServiceType"
+}
+
+data "servicefabric_service" "api" {
+  application_name = "fabric:/Contoso.Sample"
+  name             = "fabric:/Contoso.Sample/ApiService"
 }
 ```
 

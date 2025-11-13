@@ -578,6 +578,135 @@ func (c *Client) ListApplications(ctx context.Context, typeName string) ([]Appli
 	return list.Items, nil
 }
 
+// ListServiceTypes returns service types declared in an application type version.
+func (c *Client) ListServiceTypes(ctx context.Context, applicationTypeName, applicationTypeVersion string) ([]ServiceTypeInfo, error) {
+	if applicationTypeName == "" {
+		return nil, fmt.Errorf("application type name required")
+	}
+	if applicationTypeVersion == "" {
+		return nil, fmt.Errorf("application type version required")
+	}
+	path := fmt.Sprintf("/ApplicationTypes/%s/$/GetServiceTypes", url.PathEscape(applicationTypeName))
+	query := url.Values{}
+	query.Set("ApplicationTypeVersion", applicationTypeVersion)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, query, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var infos []ServiceTypeInfo
+	if err := json.NewDecoder(resp.Body).Decode(&infos); err != nil {
+		return nil, err
+	}
+	return infos, nil
+}
+
+// GetServiceType retrieves metadata for a specific service type within an application type version.
+func (c *Client) GetServiceType(ctx context.Context, applicationTypeName, applicationTypeVersion, serviceTypeName string) (*ServiceTypeInfo, error) {
+	if applicationTypeName == "" || applicationTypeVersion == "" || serviceTypeName == "" {
+		return nil, fmt.Errorf("application type name, version, and service type name are required")
+	}
+	path := fmt.Sprintf("/ApplicationTypes/%s/$/GetServiceTypes/%s", url.PathEscape(applicationTypeName), url.PathEscape(serviceTypeName))
+	query := url.Values{}
+	query.Set("ApplicationTypeVersion", applicationTypeVersion)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, query, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNoContent {
+		io.Copy(io.Discard, resp.Body)
+		return nil, &APIError{
+			Method:     http.MethodGet,
+			Path:       path,
+			StatusCode: http.StatusNotFound,
+			Message:    "service type not found",
+		}
+	}
+
+	var info ServiceTypeInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
+// GetService retrieves information about a Service Fabric service within an application.
+func (c *Client) GetService(ctx context.Context, applicationName, serviceName string) (*ServiceInfo, error) {
+	if applicationName == "" || serviceName == "" {
+		return nil, fmt.Errorf("application and service names are required")
+	}
+	appID := url.PathEscape(applicationIDFromName(applicationName))
+	serviceID := url.PathEscape(serviceIDFromName(serviceName))
+	path := fmt.Sprintf("/Applications/%s/$/GetServices/%s", appID, serviceID)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNoContent {
+		io.Copy(io.Discard, resp.Body)
+		return nil, &APIError{
+			Method:     http.MethodGet,
+			Path:       path,
+			StatusCode: http.StatusNotFound,
+			Message:    "service not found",
+		}
+	}
+
+	var info ServiceInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
+// ListServices retrieves services within an application optionally filtered by service type.
+func (c *Client) ListServices(ctx context.Context, applicationName, serviceTypeName string) ([]ServiceInfo, error) {
+	if applicationName == "" {
+		return nil, fmt.Errorf("application name required")
+	}
+	appID := url.PathEscape(applicationIDFromName(applicationName))
+	path := fmt.Sprintf("/Applications/%s/$/GetServices", appID)
+	query := url.Values{}
+	if serviceTypeName != "" {
+		query.Set("ServiceTypeName", serviceTypeName)
+	}
+
+	var (
+		items        []ServiceInfo
+		continuation string
+	)
+	for {
+		if continuation != "" {
+			query.Set("ContinuationToken", continuation)
+		} else {
+			query.Del("ContinuationToken")
+		}
+		resp, err := c.doRequest(ctx, http.MethodGet, path, query, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		var page pagedServiceInfoList
+		if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+			resp.Body.Close()
+			return nil, err
+		}
+		resp.Body.Close()
+
+		items = append(items, page.Items...)
+		continuation = page.ContinuationToken
+		if continuation == "" {
+			break
+		}
+	}
+	return items, nil
+}
+
 // ApplicationTypeInfo describes an application type version registered in the cluster.
 type ApplicationTypeInfo struct {
 	Name                   string               `json:"Name"`
@@ -608,13 +737,13 @@ func (a ApplicationTypeInfo) TypeVersion() string {
 
 // ApplicationDescription is the payload for creating/updating applications.
 type ApplicationDescription struct {
-	Name          string               `json:"Name"`
-	TypeName      string               `json:"TypeName"`
-	TypeVersion   string               `json:"TypeVersion"`
-	ParameterMap  map[string]string    `json:"-"`
-	ParameterList []NameValueParameter `json:"ParameterList,omitempty"`
-	ApplicationCapacity         *ApplicationCapacityDescription         `json:"ApplicationCapacity,omitempty"`
-	ManagedApplicationIdentity  *ManagedApplicationIdentityDescription  `json:"ManagedApplicationIdentity,omitempty"`
+	Name                       string                                 `json:"Name"`
+	TypeName                   string                                 `json:"TypeName"`
+	TypeVersion                string                                 `json:"TypeVersion"`
+	ParameterMap               map[string]string                      `json:"-"`
+	ParameterList              []NameValueParameter                   `json:"ParameterList,omitempty"`
+	ApplicationCapacity        *ApplicationCapacityDescription        `json:"ApplicationCapacity,omitempty"`
+	ManagedApplicationIdentity *ManagedApplicationIdentityDescription `json:"ManagedApplicationIdentity,omitempty"`
 }
 
 func (a *ApplicationDescription) prepare() {
@@ -632,9 +761,9 @@ type ApplicationCapacityDescription struct {
 
 // ApplicationMetricDescription configures capacity metrics for an application.
 type ApplicationMetricDescription struct {
-	Name                   string `json:"Name,omitempty"`
-	MaximumCapacity        *int64 `json:"MaximumCapacity,omitempty"`
-	ReservationCapacity    *int64 `json:"ReservationCapacity,omitempty"`
+	Name                     string `json:"Name,omitempty"`
+	MaximumCapacity          *int64 `json:"MaximumCapacity,omitempty"`
+	ReservationCapacity      *int64 `json:"ReservationCapacity,omitempty"`
 	TotalApplicationCapacity *int64 `json:"TotalApplicationCapacity,omitempty"`
 }
 
@@ -650,20 +779,58 @@ type ManagedApplicationIdentity struct {
 
 // ApplicationInfo represents an application instance.
 type ApplicationInfo struct {
-	ID            string               `json:"Id"`
-	Name          string               `json:"Name"`
-	TypeName      string               `json:"TypeName"`
-	TypeVersion   string               `json:"TypeVersion"`
-	Parameters    []NameValueParameter `json:"Parameters"`
-	ParameterList []NameValueParameter `json:"ParameterList"`
-	Status        string               `json:"Status"`
-	HealthState   string               `json:"HealthState"`
+	ID                         string                                 `json:"Id"`
+	Name                       string                                 `json:"Name"`
+	TypeName                   string                                 `json:"TypeName"`
+	TypeVersion                string                                 `json:"TypeVersion"`
+	Parameters                 []NameValueParameter                   `json:"Parameters"`
+	ParameterList              []NameValueParameter                   `json:"ParameterList"`
+	Status                     string                                 `json:"Status"`
+	HealthState                string                                 `json:"HealthState"`
 	ManagedApplicationIdentity *ManagedApplicationIdentityDescription `json:"ManagedApplicationIdentity,omitempty"`
 	ApplicationCapacity        *ApplicationCapacityDescription        `json:"ApplicationCapacity,omitempty"`
 }
 
 type applicationInfoList struct {
 	Items []ApplicationInfo `json:"Items"`
+}
+
+// ServiceTypeInfo describes a service type declared in an application type.
+type ServiceTypeInfo struct {
+	ServiceTypeDescription json.RawMessage `json:"ServiceTypeDescription"`
+	ServiceManifestName    string          `json:"ServiceManifestName"`
+	ServiceManifestVersion string          `json:"ServiceManifestVersion"`
+	IsServiceGroup         bool            `json:"IsServiceGroup"`
+}
+
+// ServiceInfo represents a Service Fabric service.
+type ServiceInfo struct {
+	ID                string           `json:"Id"`
+	Name              string           `json:"Name"`
+	TypeName          string           `json:"TypeName"`
+	ManifestVersion   string           `json:"ManifestVersion"`
+	HealthState       string           `json:"HealthState"`
+	ServiceStatus     string           `json:"ServiceStatus"`
+	ServiceKind       string           `json:"ServiceKind"`
+	Kind              string           `json:"Kind"`
+	IsServiceGroup    bool             `json:"IsServiceGroup"`
+	ServiceMetadata   *ServiceMetadata `json:"ServiceMetadata,omitempty"`
+	HasPersistedState *bool            `json:"HasPersistedState,omitempty"`
+}
+
+// ServiceMetadata captures optional ARM metadata associated with a service.
+type ServiceMetadata struct {
+	ArmMetadata *ArmMetadata `json:"ArmMetadata,omitempty"`
+}
+
+// ArmMetadata stores the ARM resource identifier surfaced by the cluster.
+type ArmMetadata struct {
+	ArmResourceID string `json:"ArmResourceId"`
+}
+
+type pagedServiceInfoList struct {
+	Items             []ServiceInfo `json:"Items"`
+	ContinuationToken string        `json:"ContinuationToken"`
 }
 
 // NameValueParameter is the common structure used by the Service Fabric API.
@@ -713,6 +880,10 @@ func applicationIDFromName(name string) string {
 	n = strings.TrimPrefix(n, "/")
 	n = strings.ReplaceAll(n, "/", "~")
 	return n
+}
+
+func serviceIDFromName(name string) string {
+	return applicationIDFromName(name)
 }
 
 func (c *Client) resolveLocation(location string) (string, error) {

@@ -65,3 +65,5 @@ The following arguments are supported in the provider block:
 
 - [`servicefabric_application_type`](data-sources/application_type.md)
 - [`servicefabric_application`](data-sources/application.md)
+- [`servicefabric_service_type`](data-sources/service_type.md)
+- [`servicefabric_service`](data-sources/service.md)

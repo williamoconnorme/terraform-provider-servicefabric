@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
@@ -15,7 +16,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	schemavalidator "github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/williamoconnorme/terraform-provider-servicefabric/internal/servicefabric"
 )
@@ -283,5 +283,7 @@ func (p *serviceFabricProvider) DataSources(_ context.Context) []func() datasour
 	return []func() datasource.DataSource{
 		NewApplicationTypeDataSource,
 		NewApplicationDataSource,
+		NewServiceTypeDataSource,
+		NewServiceDataSource,
 	}
 }

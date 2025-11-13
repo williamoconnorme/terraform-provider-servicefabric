@@ -221,7 +221,7 @@ func (d *serviceDataSource) Read(ctx context.Context, req datasource.ReadRequest
 		obj, diags := types.ObjectValue(serviceItemAttrTypes, map[string]attr.Value{
 			"id":                  stringOrNull(item.ID),
 			"name":                stringOrNull(item.Name),
-			"service_kind":        stringOrNull(serviceKindValue(item)),
+			"service_kind":        stringOrNull(serviceKindFromInfo(item)),
 			"type_name":           stringOrNull(item.TypeName),
 			"manifest_version":    stringOrNull(item.ManifestVersion),
 			"health_state":        stringOrNull(item.HealthState),
@@ -275,7 +275,7 @@ func (d *serviceDataSource) Read(ctx context.Context, req datasource.ReadRequest
 		state.Name = stringOrNull(item.Name)
 		state.TypeName = stringOrNull(item.TypeName)
 		state.ManifestVersion = stringOrNull(item.ManifestVersion)
-		state.ServiceKind = stringOrNull(serviceKindValue(item))
+		state.ServiceKind = stringOrNull(serviceKindFromInfo(item))
 		state.HealthState = stringOrNull(item.HealthState)
 		state.ServiceStatus = stringOrNull(item.ServiceStatus)
 		state.IsServiceGroup = types.BoolValue(item.IsServiceGroup)
@@ -284,13 +284,6 @@ func (d *serviceDataSource) Read(ctx context.Context, req datasource.ReadRequest
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
-}
-
-func serviceKindValue(info servicefabric.ServiceInfo) string {
-	if info.ServiceKind != "" {
-		return info.ServiceKind
-	}
-	return info.Kind
 }
 
 func armResourceID(info servicefabric.ServiceInfo) string {

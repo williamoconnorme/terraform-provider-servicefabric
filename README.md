@@ -136,7 +136,44 @@ data "servicefabric_service" "api" {
   application_name = "fabric:/Contoso.Sample"
   name             = "fabric:/Contoso.Sample/ApiService"
 }
+
+resource "servicefabric_service" "api" {
+  name              = "fabric:/Contoso.Sample/ApiService"
+  application_name  = servicefabric_application.sample.name
+  service_type_name = "Contoso.Sample.ApiServiceType"
+  service_kind      = "Stateless"
+
+  partition {
+    scheme = "Singleton"
+  }
+
+  stateless {
+    instance_count = 3
+  }
+}
 ```
+
+### `servicefabric_service`
+
+Deploys a stateful or stateless Service Fabric service within an application:
+
+```hcl
+resource "servicefabric_service" "api" {
+  name              = "fabric:/Contoso.Sample/ApiService"
+  application_name  = servicefabric_application.sample.name
+  service_type_name = "Contoso.Sample.ApiServiceType"
+  service_kind      = "Stateless"
+
+  partition {
+    scheme = "Singleton"
+  }
+
+  stateless {
+    instance_count = 3
+  }
+}
+```
+Supports singleton, named, and uniform int64 range partitions plus common mutable properties such as instance/replica counts, placement constraints, DNS names, and default move cost.
 
 ## Example Configuration
 

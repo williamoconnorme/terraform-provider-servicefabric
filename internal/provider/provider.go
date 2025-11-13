@@ -275,6 +275,7 @@ func (p *serviceFabricProvider) Resources(_ context.Context) []func() resource.R
 	return []func() resource.Resource{
 		NewApplicationTypeResource,
 		NewApplicationResource,
+		NewServiceResource,
 	}
 }
 

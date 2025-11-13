@@ -68,3 +68,12 @@ func IsApplicationAlreadyExistsError(err error) bool {
 	}
 	return false
 }
+
+// IsServiceAlreadyExistsError reports whether a service already exists.
+func IsServiceAlreadyExistsError(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == http.StatusConflict && apiErr.Code == "FABRIC_E_SERVICE_ALREADY_EXISTS"
+	}
+	return false
+}

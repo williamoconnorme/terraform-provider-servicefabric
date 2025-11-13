@@ -578,6 +578,84 @@ func (c *Client) ListApplications(ctx context.Context, typeName string) ([]Appli
 	return list.Items, nil
 }
 
+// CreateService schedules creation of a stateful or stateless service within an application.
+func (c *Client) CreateService(ctx context.Context, desc any) error {
+	base := serviceDescriptionBase(desc)
+	if base == nil {
+		return fmt.Errorf("unsupported service description type %T", desc)
+	}
+	if base.ApplicationName == "" {
+		return fmt.Errorf("application name required")
+	}
+	if base.ServiceName == "" {
+		return fmt.Errorf("service name required")
+	}
+	if base.ServiceTypeName == "" {
+		return fmt.Errorf("service type name required")
+	}
+	if base.PartitionDescription.PartitionScheme == "" {
+		return fmt.Errorf("partition scheme required")
+	}
+
+	appID := url.PathEscape(applicationIDFromName(base.ApplicationName))
+	path := fmt.Sprintf("/Applications/%s/$/GetServices/$/Create", appID)
+	resp, err := c.doRequest(ctx, http.MethodPost, path, nil, desc)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusAccepted {
+		return c.pollOperation(ctx, resp.Header.Get("Location"))
+	}
+	io.Copy(io.Discard, resp.Body)
+	return nil
+}
+
+// UpdateService modifies mutable properties of an existing service.
+func (c *Client) UpdateService(ctx context.Context, serviceName string, desc any) error {
+	if serviceName == "" {
+		return fmt.Errorf("service name required")
+	}
+	serviceID := url.PathEscape(serviceIDFromName(serviceName))
+	path := fmt.Sprintf("/Services/%s/$/Update", serviceID)
+	resp, err := c.doRequest(ctx, http.MethodPost, path, nil, desc)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusAccepted {
+		return c.pollOperation(ctx, resp.Header.Get("Location"))
+	}
+	io.Copy(io.Discard, resp.Body)
+	return nil
+}
+
+// DeleteService removes a Service Fabric service.
+func (c *Client) DeleteService(ctx context.Context, serviceName string, force bool) error {
+	if serviceName == "" {
+		return fmt.Errorf("service name required")
+	}
+	serviceID := url.PathEscape(serviceIDFromName(serviceName))
+	path := fmt.Sprintf("/Services/%s/$/Delete", serviceID)
+	query := url.Values{}
+	if force {
+		query.Set("ForceRemove", "true")
+	}
+	resp, err := c.doRequest(ctx, http.MethodPost, path, query, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusAccepted {
+		return c.pollOperation(ctx, resp.Header.Get("Location"))
+	}
+	io.Copy(io.Discard, resp.Body)
+	return nil
+}
+
 // ListServiceTypes returns service types declared in an application type version.
 func (c *Client) ListServiceTypes(ctx context.Context, applicationTypeName, applicationTypeVersion string) ([]ServiceTypeInfo, error) {
 	if applicationTypeName == "" {
@@ -795,6 +873,79 @@ type applicationInfoList struct {
 	Items []ApplicationInfo `json:"Items"`
 }
 
+// PartitionDescription describes a service partitioning scheme.
+type PartitionDescription struct {
+	PartitionScheme string   `json:"PartitionScheme"`
+	Count           *int64   `json:"Count,omitempty"`
+	Names           []string `json:"Names,omitempty"`
+	LowKey          *int64   `json:"LowKey,omitempty"`
+	HighKey         *int64   `json:"HighKey,omitempty"`
+}
+
+// ServiceDescription captures settings shared by all services.
+type ServiceDescription struct {
+	ServiceKind                  string               `json:"ServiceKind"`
+	ApplicationName              string               `json:"ApplicationName"`
+	ServiceName                  string               `json:"ServiceName"`
+	ServiceTypeName              string               `json:"ServiceTypeName"`
+	PartitionDescription         PartitionDescription `json:"PartitionDescription"`
+	PlacementConstraints         string               `json:"PlacementConstraints,omitempty"`
+	DefaultMoveCost              string               `json:"DefaultMoveCost,omitempty"`
+	ServicePackageActivationMode string               `json:"ServicePackageActivationMode,omitempty"`
+	ServiceDnsName               string               `json:"ServiceDnsName,omitempty"`
+}
+
+// StatelessServiceDescription configures stateless service creation.
+type StatelessServiceDescription struct {
+	ServiceDescription
+	InstanceCount                      int64   `json:"InstanceCount"`
+	MinInstanceCount                   *int64  `json:"MinInstanceCount,omitempty"`
+	MinInstancePercentage              *int64  `json:"MinInstancePercentage,omitempty"`
+	InstanceCloseDelayDurationSeconds  *string `json:"InstanceCloseDelayDurationSeconds,omitempty"`
+	InstanceRestartWaitDurationSeconds *string `json:"InstanceRestartWaitDurationSeconds,omitempty"`
+}
+
+// StatefulServiceDescription configures stateful service creation.
+type StatefulServiceDescription struct {
+	ServiceDescription
+	TargetReplicaSetSize              int64   `json:"TargetReplicaSetSize"`
+	MinReplicaSetSize                 int64   `json:"MinReplicaSetSize"`
+	HasPersistedState                 bool    `json:"HasPersistedState"`
+	ReplicaRestartWaitDurationSeconds *string `json:"ReplicaRestartWaitDurationSeconds,omitempty"`
+	QuorumLossWaitDurationSeconds     *string `json:"QuorumLossWaitDurationSeconds,omitempty"`
+	StandByReplicaKeepDurationSeconds *string `json:"StandByReplicaKeepDurationSeconds,omitempty"`
+	ServicePlacementTimeLimitSeconds  *string `json:"ServicePlacementTimeLimitSeconds,omitempty"`
+}
+
+// StatelessServiceUpdateDescription defines mutable stateless service settings.
+type StatelessServiceUpdateDescription struct {
+	ServiceKind                        string  `json:"ServiceKind"`
+	Flags                              string  `json:"Flags,omitempty"`
+	PlacementConstraints               *string `json:"PlacementConstraints,omitempty"`
+	DefaultMoveCost                    *string `json:"DefaultMoveCost,omitempty"`
+	ServiceDnsName                     *string `json:"ServiceDnsName,omitempty"`
+	InstanceCount                      *int64  `json:"InstanceCount,omitempty"`
+	MinInstanceCount                   *int64  `json:"MinInstanceCount,omitempty"`
+	MinInstancePercentage              *int64  `json:"MinInstancePercentage,omitempty"`
+	InstanceCloseDelayDurationSeconds  *string `json:"InstanceCloseDelayDurationSeconds,omitempty"`
+	InstanceRestartWaitDurationSeconds *string `json:"InstanceRestartWaitDurationSeconds,omitempty"`
+}
+
+// StatefulServiceUpdateDescription defines mutable stateful service settings.
+type StatefulServiceUpdateDescription struct {
+	ServiceKind                       string  `json:"ServiceKind"`
+	Flags                             string  `json:"Flags,omitempty"`
+	PlacementConstraints              *string `json:"PlacementConstraints,omitempty"`
+	DefaultMoveCost                   *string `json:"DefaultMoveCost,omitempty"`
+	ServiceDnsName                    *string `json:"ServiceDnsName,omitempty"`
+	TargetReplicaSetSize              *int64  `json:"TargetReplicaSetSize,omitempty"`
+	MinReplicaSetSize                 *int64  `json:"MinReplicaSetSize,omitempty"`
+	ReplicaRestartWaitDurationSeconds *string `json:"ReplicaRestartWaitDurationSeconds,omitempty"`
+	QuorumLossWaitDurationSeconds     *string `json:"QuorumLossWaitDurationSeconds,omitempty"`
+	StandByReplicaKeepDurationSeconds *string `json:"StandByReplicaKeepDurationSeconds,omitempty"`
+	ServicePlacementTimeLimitSeconds  *string `json:"ServicePlacementTimeLimitSeconds,omitempty"`
+}
+
 // ServiceTypeInfo describes a service type declared in an application type.
 type ServiceTypeInfo struct {
 	ServiceTypeDescription json.RawMessage `json:"ServiceTypeDescription"`
@@ -884,6 +1035,21 @@ func applicationIDFromName(name string) string {
 
 func serviceIDFromName(name string) string {
 	return applicationIDFromName(name)
+}
+
+func serviceDescriptionBase(desc any) *ServiceDescription {
+	switch v := desc.(type) {
+	case *StatelessServiceDescription:
+		return &v.ServiceDescription
+	case StatelessServiceDescription:
+		return &v.ServiceDescription
+	case *StatefulServiceDescription:
+		return &v.ServiceDescription
+	case StatefulServiceDescription:
+		return &v.ServiceDescription
+	default:
+		return nil
+	}
 }
 
 func (c *Client) resolveLocation(location string) (string, error) {

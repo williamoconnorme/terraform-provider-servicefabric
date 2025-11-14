@@ -37,6 +37,11 @@ resource "servicefabric_application" "sample" {
       "00000000-0000-0000-0000-000000000000",
     ]
   }
+
+  upgrade_policy {
+    force_restart = false
+    upgrade_mode  = "Monitored"
+  }
 }
 ```
 
@@ -69,6 +74,24 @@ resource "servicefabric_application" "sample" {
     identity federation.
   - `identities` (Optional) – List of managed identity resource names or
     principal IDs (GUIDs) to associate with the application.
+- `upgrade_policy` (Optional) – Controls how upgrades are applied when
+  `type_version` or `parameters` change:
+  - `force_restart` (Optional) – When `true`, Service Fabric forcefully restarts
+    code packages instead of waiting for graceful shutdown.
+  - `upgrade_mode` (Optional) – Upgrade mode. Allowed values:
+    `UnmonitoredAuto`, `UnmonitoredManual`, or `Monitored`.
+  - `monitoring_policy` (Optional) – Nested block with advanced timeouts:
+    - `failure_action` – `Rollback` or `Manual`.
+    - `health_check_wait_duration`,
+      `health_check_stable_duration`,
+      `health_check_retry_timeout`,
+      `upgrade_timeout`,
+      `upgrade_domain_timeout` – ISO8601 durations (e.g. `PT5M`).
+  - `application_health_policy` (Optional) – Nested block with:
+    - `consider_warning_as_error` (Optional) – Treat warnings as errors during
+      upgrades.
+    - `max_percent_unhealthy_deployed_applications` (Optional) – Maximum
+      percentage of unhealthy deployed applications allowed.
 
 ## Attribute Reference
 

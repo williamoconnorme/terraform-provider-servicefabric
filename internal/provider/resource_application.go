@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -13,6 +14,7 @@ import (
 	rschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	stringplanmodifier "github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -24,9 +26,9 @@ var _ resource.ResourceWithImportState = &applicationResource{}
 
 var (
 	applicationMetricAttrTypes = map[string]attr.Type{
-		"name":                     types.StringType,
-		"maximum_capacity":         types.Int64Type,
-		"reservation_capacity":     types.Int64Type,
+		"name":                       types.StringType,
+		"maximum_capacity":           types.Int64Type,
+		"reservation_capacity":       types.Int64Type,
 		"total_application_capacity": types.Int64Type,
 	}
 	applicationCapacityAttrTypes = map[string]attr.Type{
@@ -47,33 +49,62 @@ type applicationResource struct {
 }
 
 type applicationResourceModel struct {
-	ID          types.String `tfsdk:"id"`
-	Name        types.String `tfsdk:"name"`
-	TypeName    types.String `tfsdk:"type_name"`
-	TypeVersion types.String `tfsdk:"type_version"`
-	Parameters  types.Map    `tfsdk:"parameters"`
-	Status      types.String `tfsdk:"status"`
-	HealthState types.String `tfsdk:"health_state"`
-	ApplicationCapacity         types.Object `tfsdk:"application_capacity"`
-	ManagedApplicationIdentity  types.Object `tfsdk:"managed_application_identity"`
+	ID                         types.String        `tfsdk:"id"`
+	Name                       types.String        `tfsdk:"name"`
+	TypeName                   types.String        `tfsdk:"type_name"`
+	TypeVersion                types.String        `tfsdk:"type_version"`
+	Parameters                 types.Map           `tfsdk:"parameters"`
+	Status                     types.String        `tfsdk:"status"`
+	HealthState                types.String        `tfsdk:"health_state"`
+	ApplicationCapacity        types.Object        `tfsdk:"application_capacity"`
+	ManagedApplicationIdentity types.Object        `tfsdk:"managed_application_identity"`
+	UpgradePolicy              *upgradePolicyModel `tfsdk:"upgrade_policy"`
 }
 
 type applicationCapacityModel struct {
-	MinimumNodes       types.Int64                 `tfsdk:"minimum_nodes"`
-	MaximumNodes       types.Int64                 `tfsdk:"maximum_nodes"`
-	ApplicationMetrics []applicationMetricModel    `tfsdk:"application_metrics"`
+	MinimumNodes       types.Int64              `tfsdk:"minimum_nodes"`
+	MaximumNodes       types.Int64              `tfsdk:"maximum_nodes"`
+	ApplicationMetrics []applicationMetricModel `tfsdk:"application_metrics"`
 }
 
 type applicationMetricModel struct {
-	Name                   types.String `tfsdk:"name"`
-	MaximumCapacity        types.Int64  `tfsdk:"maximum_capacity"`
-	ReservationCapacity    types.Int64  `tfsdk:"reservation_capacity"`
-	TotalApplicationCapacity types.Int64 `tfsdk:"total_application_capacity"`
+	Name                     types.String `tfsdk:"name"`
+	MaximumCapacity          types.Int64  `tfsdk:"maximum_capacity"`
+	ReservationCapacity      types.Int64  `tfsdk:"reservation_capacity"`
+	TotalApplicationCapacity types.Int64  `tfsdk:"total_application_capacity"`
 }
 
 type managedApplicationIdentityModel struct {
-	TokenServiceEndpoint types.String                `tfsdk:"token_service_endpoint"`
-	Identities           types.List                  `tfsdk:"identities"`
+	TokenServiceEndpoint types.String `tfsdk:"token_service_endpoint"`
+	Identities           types.List   `tfsdk:"identities"`
+}
+
+type upgradePolicyModel struct {
+	ForceRestart            types.Bool                    `tfsdk:"force_restart"`
+	UpgradeMode             types.String                  `tfsdk:"upgrade_mode"`
+	MonitoringPolicy        *monitoringPolicyModel        `tfsdk:"monitoring_policy"`
+	ApplicationHealthPolicy *applicationHealthPolicyModel `tfsdk:"application_health_policy"`
+}
+
+type applicationUpgradePolicy struct {
+	ForceRestart            *bool
+	UpgradeMode             string
+	MonitoringPolicy        *servicefabric.RollingUpgradeMonitoringPolicy
+	ApplicationHealthPolicy *servicefabric.ApplicationHealthPolicy
+}
+
+type monitoringPolicyModel struct {
+	FailureAction             types.String `tfsdk:"failure_action"`
+	HealthCheckWaitDuration   types.String `tfsdk:"health_check_wait_duration"`
+	HealthCheckStableDuration types.String `tfsdk:"health_check_stable_duration"`
+	HealthCheckRetryTimeout   types.String `tfsdk:"health_check_retry_timeout"`
+	UpgradeTimeout            types.String `tfsdk:"upgrade_timeout"`
+	UpgradeDomainTimeout      types.String `tfsdk:"upgrade_domain_timeout"`
+}
+
+type applicationHealthPolicyModel struct {
+	ConsiderWarningAsError                  types.Bool  `tfsdk:"consider_warning_as_error"`
+	MaxPercentUnhealthyDeployedApplications types.Int64 `tfsdk:"max_percent_unhealthy_deployed_applications"`
 }
 
 func NewApplicationResource() resource.Resource {
@@ -104,71 +135,136 @@ func (r *applicationResource) Schema(_ context.Context, _ resource.SchemaRequest
 				Required:    true,
 				Description: "Application type version to deploy.",
 			},
-		"parameters": rschema.MapAttribute{
-			Optional:    true,
-			ElementType: types.StringType,
-			Description: "Application parameters supplied to the deployment.",
-		},
-		"application_capacity": rschema.SingleNestedAttribute{
-			Optional:    true,
-			Description: "Application capacity settings used to reserve and limit cluster resources.",
-			Attributes: map[string]rschema.Attribute{
-				"minimum_nodes": rschema.Int64Attribute{
-					Optional:    true,
-					Description: "Minimum number of nodes where the application will reserve capacity.",
-				},
-				"maximum_nodes": rschema.Int64Attribute{
-					Optional:    true,
-					Description: "Maximum number of nodes where the application can reserve capacity (0 means unlimited).",
-				},
-				"application_metrics": rschema.ListNestedAttribute{
-					Optional:    true,
-					Description: "Application metric capacity settings applied across the cluster.",
-					NestedObject: rschema.NestedAttributeObject{
-						Attributes: map[string]rschema.Attribute{
-							"name": rschema.StringAttribute{
-								Required:    true,
-								Description: "Metric name.",
-							},
-							"maximum_capacity": rschema.Int64Attribute{
-								Optional:    true,
-								Description: "Maximum capacity per node for this metric (0 means unlimited).",
-							},
-							"reservation_capacity": rschema.Int64Attribute{
-								Optional:    true,
-								Description: "Reserved capacity per node for this metric.",
-							},
-							"total_application_capacity": rschema.Int64Attribute{
-								Optional:    true,
-								Description: "Total capacity for this metric across the application (0 means unlimited).",
+			"parameters": rschema.MapAttribute{
+				Optional:    true,
+				ElementType: types.StringType,
+				Description: "Application parameters supplied to the deployment.",
+			},
+			"application_capacity": rschema.SingleNestedAttribute{
+				Optional:    true,
+				Description: "Application capacity settings used to reserve and limit cluster resources.",
+				Attributes: map[string]rschema.Attribute{
+					"minimum_nodes": rschema.Int64Attribute{
+						Optional:    true,
+						Description: "Minimum number of nodes where the application will reserve capacity.",
+					},
+					"maximum_nodes": rschema.Int64Attribute{
+						Optional:    true,
+						Description: "Maximum number of nodes where the application can reserve capacity (0 means unlimited).",
+					},
+					"application_metrics": rschema.ListNestedAttribute{
+						Optional:    true,
+						Description: "Application metric capacity settings applied across the cluster.",
+						NestedObject: rschema.NestedAttributeObject{
+							Attributes: map[string]rschema.Attribute{
+								"name": rschema.StringAttribute{
+									Required:    true,
+									Description: "Metric name.",
+								},
+								"maximum_capacity": rschema.Int64Attribute{
+									Optional:    true,
+									Description: "Maximum capacity per node for this metric (0 means unlimited).",
+								},
+								"reservation_capacity": rschema.Int64Attribute{
+									Optional:    true,
+									Description: "Reserved capacity per node for this metric.",
+								},
+								"total_application_capacity": rschema.Int64Attribute{
+									Optional:    true,
+									Description: "Total capacity for this metric across the application (0 means unlimited).",
+								},
 							},
 						},
 					},
 				},
 			},
-		},
-		"managed_application_identity": rschema.SingleNestedAttribute{
-			Optional:    true,
-			Description: "Configures managed identities attached to the Service Fabric application.",
-			Attributes: map[string]rschema.Attribute{
-				"token_service_endpoint": rschema.StringAttribute{
-					Optional:    true,
-					Description: "Token service endpoint used for identity propagation.",
-				},
-				"identities": rschema.ListAttribute{
-					Optional:    true,
-					ElementType: types.StringType,
-					Description: "List of managed identity names or principal IDs (GUIDs).",
+			"managed_application_identity": rschema.SingleNestedAttribute{
+				Optional:    true,
+				Description: "Configures managed identities attached to the Service Fabric application.",
+				Attributes: map[string]rschema.Attribute{
+					"token_service_endpoint": rschema.StringAttribute{
+						Optional:    true,
+						Description: "Token service endpoint used for identity propagation.",
+					},
+					"identities": rschema.ListAttribute{
+						Optional:    true,
+						ElementType: types.StringType,
+						Description: "List of managed identity names or principal IDs (GUIDs).",
+					},
 				},
 			},
-		},
-		"status": rschema.StringAttribute{
-			Computed:    true,
-			Description: "Current application status.",
-		},
+			"status": rschema.StringAttribute{
+				Computed:    true,
+				Description: "Current application status.",
+			},
 			"health_state": rschema.StringAttribute{
 				Computed:    true,
 				Description: "Cluster-reported health state.",
+			},
+		},
+		Blocks: map[string]rschema.Block{
+			"upgrade_policy": rschema.SingleNestedBlock{
+				Description: "Controls how Service Fabric performs upgrades when application type versions change.",
+				Attributes: map[string]rschema.Attribute{
+					"force_restart": rschema.BoolAttribute{
+						Optional:    true,
+						Description: "Forcefully restart code packages during upgrades.",
+					},
+					"upgrade_mode": rschema.StringAttribute{
+						Optional:    true,
+						Description: "Upgrade mode (UnmonitoredAuto, UnmonitoredManual, or Monitored).",
+						Validators: []validator.String{
+							stringvalidator.OneOf("UnmonitoredAuto", "UnmonitoredManual", "Monitored"),
+						},
+					},
+				},
+				Blocks: map[string]rschema.Block{
+					"monitoring_policy": rschema.SingleNestedBlock{
+						Description: "Overrides monitoring timeouts for rolling upgrades.",
+						Attributes: map[string]rschema.Attribute{
+							"failure_action": rschema.StringAttribute{
+								Optional:    true,
+								Description: "Action taken when monitors report health violations. Allowed values: Rollback or Manual.",
+								Validators: []validator.String{
+									stringvalidator.OneOf("Rollback", "Manual"),
+								},
+							},
+							"health_check_wait_duration": rschema.StringAttribute{
+								Optional:    true,
+								Description: "Time to wait after completing an upgrade domain before health checks start (ISO8601 duration).",
+							},
+							"health_check_stable_duration": rschema.StringAttribute{
+								Optional:    true,
+								Description: "Time that health must remain stable before proceeding (ISO8601 duration).",
+							},
+							"health_check_retry_timeout": rschema.StringAttribute{
+								Optional:    true,
+								Description: "Maximum time to wait for health to become stable before failure (ISO8601 duration).",
+							},
+							"upgrade_timeout": rschema.StringAttribute{
+								Optional:    true,
+								Description: "Overall upgrade timeout (ISO8601 duration).",
+							},
+							"upgrade_domain_timeout": rschema.StringAttribute{
+								Optional:    true,
+								Description: "Timeout per upgrade domain (ISO8601 duration).",
+							},
+						},
+					},
+					"application_health_policy": rschema.SingleNestedBlock{
+						Description: "Health policy evaluated during upgrades.",
+						Attributes: map[string]rschema.Attribute{
+							"consider_warning_as_error": rschema.BoolAttribute{
+								Optional:    true,
+								Description: "Treat warning health reports as errors during upgrades.",
+							},
+							"max_percent_unhealthy_deployed_applications": rschema.Int64Attribute{
+								Optional:    true,
+								Description: "Maximum percentage of unhealthy deployed applications allowed before aborting upgrades.",
+							},
+						},
+					},
+				},
 			},
 		},
 	}
@@ -227,6 +323,12 @@ func (r *applicationResource) Create(ctx context.Context, req resource.CreateReq
 		desc.ManagedApplicationIdentity = identityDesc
 	}
 
+	upgradePolicy, policyDiags := expandApplicationUpgradePolicy(ctx, plan.UpgradePolicy)
+	resp.Diagnostics.Append(policyDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	if err := r.client.CreateApplication(ctx, desc); err != nil {
 		if r.features.ApplicationRecreateOnUpgrade && servicefabric.IsApplicationAlreadyExistsError(err) {
 			tflog.Info(ctx, "Existing Service Fabric application detected, initiating upgrade instead of create", map[string]any{
@@ -238,8 +340,8 @@ func (r *applicationResource) Create(ctx context.Context, req resource.CreateReq
 				Name:                         plan.Name.ValueString(),
 				TargetApplicationTypeVersion: plan.TypeVersion.ValueString(),
 				ParameterMap:                 paramMap,
-				ForceRestart:                 true,
 			}
+			applyUpgradePolicy(&upgradeDesc, upgradePolicy, true)
 			if upgradeErr := r.client.UpgradeApplication(ctx, upgradeDesc); upgradeErr != nil {
 				resp.Diagnostics.AddError("Failed to upgrade existing application", upgradeErr.Error())
 				return
@@ -347,6 +449,12 @@ func (r *applicationResource) Update(ctx context.Context, req resource.UpdateReq
 		return
 	}
 
+	planUpgradePolicy, policyDiags := expandApplicationUpgradePolicy(ctx, plan.UpgradePolicy)
+	resp.Diagnostics.Append(policyDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	stateParams := map[string]string{}
 	if !state.Parameters.IsNull() && !state.Parameters.IsUnknown() {
 		diag := state.Parameters.ElementsAs(ctx, &stateParams, false)
@@ -384,6 +492,7 @@ func (r *applicationResource) Update(ctx context.Context, req resource.UpdateReq
 		TargetApplicationTypeVersion: plan.TypeVersion.ValueString(),
 		ParameterMap:                 planParams,
 	}
+	applyUpgradePolicy(&upgradeDesc, planUpgradePolicy, false)
 
 	tflog.Info(ctx, "Starting Service Fabric application upgrade", map[string]any{
 		"name":              plan.Name.ValueString(),
@@ -571,9 +680,9 @@ func flattenApplicationCapacity(_ context.Context, cap *servicefabric.Applicatio
 		}
 		metricHasValue := true
 		metricAttrs := map[string]attr.Value{
-			"name":                     types.StringValue(metric.Name),
-			"maximum_capacity":         types.Int64Null(),
-			"reservation_capacity":     types.Int64Null(),
+			"name":                       types.StringValue(metric.Name),
+			"maximum_capacity":           types.Int64Null(),
+			"reservation_capacity":       types.Int64Null(),
 			"total_application_capacity": types.Int64Null(),
 		}
 		if metric.MaximumCapacity != nil {
@@ -609,11 +718,11 @@ func flattenApplicationCapacity(_ context.Context, cap *servicefabric.Applicatio
 	}
 	attrs["application_metrics"] = metricList
 
-obj, objDiags := types.ObjectValue(applicationCapacityAttrTypes, attrs)
-if objDiags.HasError() {
-	return types.ObjectNull(applicationCapacityAttrTypes), objDiags
-}
-return obj, nil
+	obj, objDiags := types.ObjectValue(applicationCapacityAttrTypes, attrs)
+	if objDiags.HasError() {
+		return types.ObjectNull(applicationCapacityAttrTypes), objDiags
+	}
+	return obj, nil
 }
 
 func flattenManagedApplicationIdentity(_ context.Context, identity *servicefabric.ManagedApplicationIdentityDescription) (types.Object, diag.Diagnostics) {
@@ -741,6 +850,131 @@ func managedApplicationIdentityEqual(a, b *servicefabric.ManagedApplicationIdent
 		}
 	}
 	return true
+}
+
+func expandApplicationUpgradePolicy(ctx context.Context, model *upgradePolicyModel) (*applicationUpgradePolicy, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	if model == nil {
+		return nil, diags
+	}
+
+	result := &applicationUpgradePolicy{}
+	if !model.ForceRestart.IsNull() && !model.ForceRestart.IsUnknown() {
+		v := model.ForceRestart.ValueBool()
+		result.ForceRestart = &v
+	}
+	hasValue := false
+	if v, ok := stringValue(model.UpgradeMode); ok {
+		result.UpgradeMode = v
+		hasValue = true
+	}
+
+	monitoring, monitoringDiags := expandMonitoringPolicy(ctx, model.MonitoringPolicy)
+	diags.Append(monitoringDiags...)
+	if diags.HasError() {
+		return nil, diags
+	}
+	if monitoring != nil {
+		result.MonitoringPolicy = monitoring
+		hasValue = true
+	}
+
+	healthPolicy, healthDiags := expandApplicationHealthPolicy(ctx, model.ApplicationHealthPolicy)
+	diags.Append(healthDiags...)
+	if diags.HasError() {
+		return nil, diags
+	}
+	if healthPolicy != nil {
+		result.ApplicationHealthPolicy = healthPolicy
+		hasValue = true
+	}
+
+	if result.ForceRestart == nil && !hasValue {
+		return nil, diags
+	}
+	return result, diags
+}
+
+func expandMonitoringPolicy(_ context.Context, model *monitoringPolicyModel) (*servicefabric.RollingUpgradeMonitoringPolicy, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	if model == nil {
+		return nil, diags
+	}
+
+	policy := &servicefabric.RollingUpgradeMonitoringPolicy{}
+	hasValue := false
+	if v, ok := stringValue(model.FailureAction); ok {
+		policy.FailureAction = v
+		hasValue = true
+	}
+	if v, ok := stringValue(model.HealthCheckWaitDuration); ok {
+		policy.HealthCheckWaitDurationInMilliseconds = v
+		hasValue = true
+	}
+	if v, ok := stringValue(model.HealthCheckStableDuration); ok {
+		policy.HealthCheckStableDurationInMilliseconds = v
+		hasValue = true
+	}
+	if v, ok := stringValue(model.HealthCheckRetryTimeout); ok {
+		policy.HealthCheckRetryTimeoutInMilliseconds = v
+		hasValue = true
+	}
+	if v, ok := stringValue(model.UpgradeTimeout); ok {
+		policy.UpgradeTimeoutInMilliseconds = v
+		hasValue = true
+	}
+	if v, ok := stringValue(model.UpgradeDomainTimeout); ok {
+		policy.UpgradeDomainTimeoutInMilliseconds = v
+		hasValue = true
+	}
+	if !hasValue {
+		return nil, diags
+	}
+	return policy, diags
+}
+
+func expandApplicationHealthPolicy(_ context.Context, model *applicationHealthPolicyModel) (*servicefabric.ApplicationHealthPolicy, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	if model == nil {
+		return nil, diags
+	}
+
+	policy := &servicefabric.ApplicationHealthPolicy{}
+	hasValue := false
+	if !model.ConsiderWarningAsError.IsNull() && !model.ConsiderWarningAsError.IsUnknown() {
+		policy.ConsiderWarningAsError = model.ConsiderWarningAsError.ValueBool()
+		hasValue = true
+	}
+	if !model.MaxPercentUnhealthyDeployedApplications.IsNull() && !model.MaxPercentUnhealthyDeployedApplications.IsUnknown() {
+		v := model.MaxPercentUnhealthyDeployedApplications.ValueInt64()
+		policy.MaxPercentUnhealthyDeployedApplications = &v
+		hasValue = true
+	}
+	if !hasValue {
+		return nil, diags
+	}
+	return policy, diags
+}
+
+func applyUpgradePolicy(desc *servicefabric.ApplicationUpgradeDescription, policy *applicationUpgradePolicy, defaultForce bool) {
+	if policy == nil {
+		desc.ForceRestart = defaultForce
+		return
+	}
+	if policy.ForceRestart != nil {
+		desc.ForceRestart = *policy.ForceRestart
+	} else {
+		desc.ForceRestart = defaultForce
+	}
+	if policy.UpgradeMode != "" {
+		desc.RollingUpgradeMode = policy.UpgradeMode
+	}
+	if policy.MonitoringPolicy != nil {
+		desc.MonitoringPolicy = policy.MonitoringPolicy
+	}
+	if policy.ApplicationHealthPolicy != nil {
+		desc.ApplicationHealthPolicy = policy.ApplicationHealthPolicy
+	}
 }
 
 func int64PtrEqual(a, b *int64) bool {

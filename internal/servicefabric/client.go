@@ -395,13 +395,15 @@ const (
 
 // ApplicationUpgradeDescription describes an application upgrade request.
 type ApplicationUpgradeDescription struct {
-	Name                         string               `json:"Name"`
-	TargetApplicationTypeVersion string               `json:"TargetApplicationTypeVersion"`
-	ParameterMap                 map[string]string    `json:"-"`
-	Parameters                   []NameValueParameter `json:"Parameters,omitempty"`
-	UpgradeKind                  string               `json:"UpgradeKind"`
-	RollingUpgradeMode           string               `json:"RollingUpgradeMode,omitempty"`
-	ForceRestart                 bool                 `json:"ForceRestart,omitempty"`
+	Name                         string                          `json:"Name"`
+	TargetApplicationTypeVersion string                          `json:"TargetApplicationTypeVersion"`
+	ParameterMap                 map[string]string               `json:"-"`
+	Parameters                   []NameValueParameter            `json:"Parameters,omitempty"`
+	UpgradeKind                  string                          `json:"UpgradeKind"`
+	RollingUpgradeMode           string                          `json:"RollingUpgradeMode,omitempty"`
+	ForceRestart                 bool                            `json:"ForceRestart,omitempty"`
+	ApplicationHealthPolicy      *ApplicationHealthPolicy        `json:"ApplicationHealthPolicy,omitempty"`
+	MonitoringPolicy             *RollingUpgradeMonitoringPolicy `json:"MonitoringPolicy,omitempty"`
 }
 
 func (d *ApplicationUpgradeDescription) prepare() {
@@ -867,6 +869,22 @@ type ApplicationInfo struct {
 	HealthState                string                                 `json:"HealthState"`
 	ManagedApplicationIdentity *ManagedApplicationIdentityDescription `json:"ManagedApplicationIdentity,omitempty"`
 	ApplicationCapacity        *ApplicationCapacityDescription        `json:"ApplicationCapacity,omitempty"`
+}
+
+// ApplicationHealthPolicy controls health thresholds during upgrades.
+type ApplicationHealthPolicy struct {
+	ConsiderWarningAsError                  bool   `json:"ConsiderWarningAsError,omitempty"`
+	MaxPercentUnhealthyDeployedApplications *int64 `json:"MaxPercentUnhealthyDeployedApplications,omitempty"`
+}
+
+// RollingUpgradeMonitoringPolicy adjusts how Service Fabric monitors upgrades.
+type RollingUpgradeMonitoringPolicy struct {
+	FailureAction                           string `json:"FailureAction,omitempty"`
+	HealthCheckWaitDurationInMilliseconds   string `json:"HealthCheckWaitDurationInMilliseconds,omitempty"`
+	HealthCheckStableDurationInMilliseconds string `json:"HealthCheckStableDurationInMilliseconds,omitempty"`
+	HealthCheckRetryTimeoutInMilliseconds   string `json:"HealthCheckRetryTimeoutInMilliseconds,omitempty"`
+	UpgradeTimeoutInMilliseconds            string `json:"UpgradeTimeoutInMilliseconds,omitempty"`
+	UpgradeDomainTimeoutInMilliseconds      string `json:"UpgradeDomainTimeoutInMilliseconds,omitempty"`
 }
 
 type applicationInfoList struct {

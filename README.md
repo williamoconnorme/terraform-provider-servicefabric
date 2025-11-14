@@ -111,6 +111,22 @@ resource "servicefabric_application" "sample" {
       "00000000-0000-0000-0000-000000000000",
     ]
   }
+
+  upgrade_policy {
+    force_restart = false
+    upgrade_mode  = "Monitored"
+
+    monitoring_policy {
+      failure_action              = "Rollback"
+      health_check_wait_duration  = "PT60S"
+      health_check_stable_duration = "PT120S"
+    }
+
+    application_health_policy {
+      consider_warning_as_error                   = true
+      max_percent_unhealthy_deployed_applications = 20
+    }
+  }
 }
 ```
 

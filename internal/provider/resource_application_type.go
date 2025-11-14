@@ -84,16 +84,16 @@ func (r *applicationTypeResource) Schema(_ context.Context, _ resource.SchemaReq
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-		"version": rschema.StringAttribute{
-			Required: true,
-			Validators: []validator.String{
-				stringvalidator.LengthAtLeast(1),
+			"version": rschema.StringAttribute{
+				Required: true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
+				Description: "Application type version.",
+				PlanModifiers: []planmodifier.String{
+					featureAwareVersionPlanModifier{resource: r},
+				},
 			},
-			Description: "Application type version.",
-			PlanModifiers: []planmodifier.String{
-				featureAwareVersionPlanModifier{resource: r},
-			},
-		},
 			"package_uri": rschema.StringAttribute{
 				Required:    true,
 				Description: "Service Fabric package URI (SAS URL) pointing to the SFPKG.",

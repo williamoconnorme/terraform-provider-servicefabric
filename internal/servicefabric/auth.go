@@ -65,10 +65,10 @@ func (c *CertificateAuthenticator) Apply(_ context.Context, _ *http.Request) err
 
 // EntraOptions contains parameters for acquiring Entra ID tokens.
 type EntraOptions struct {
-	ClusterApplicationID string
-	TenantID             string
-	ClientID             string
-	ClientSecret         string
+	ClusterApplicationID  string
+	TenantID              string
+	ClientID              string
+	ClientSecret          string
 	DefaultCredentialType string
 }
 

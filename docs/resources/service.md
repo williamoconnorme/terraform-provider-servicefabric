@@ -15,11 +15,11 @@ resource "servicefabric_service" "api" {
   service_type_name = "Contoso.Sample.ApiServiceType"
   service_kind      = "Stateless"
 
-  partition {
+  partition = {
     scheme = "Singleton"
   }
 
-  stateless {
+  stateless = {
     instance_count = 3
   }
 }
@@ -41,12 +41,13 @@ The following arguments are supported:
   `ExclusiveProcess`. Changing this value forces a new resource.
 - `service_dns_name` (Optional) – DNS name assigned to the service.
 - `force_remove` (Optional) – When true, destroy issues `ForceRemove=true`.
-- `partition` (Required) – Single nested block describing partitioning:
+- `partition` (Required) – Object attribute describing partitioning:
   - `scheme` (Required) – `Singleton`, `Named`, or `UniformInt64Range`.
   - `count` (Optional) – Partition count (named or uniform schemes).
   - `names` (Optional) – List of partition names (named scheme).
   - `low_key` / `high_key` (Optional) – Key range (uniform scheme).
 - `stateless` (Optional) – Required when `service_kind = "Stateless"`.
+  Configure as `stateless = { ... }`. Supports:
   Supports:
   - `instance_count` (Optional) – Number of instances per partition (-1 deploys
     everywhere).
@@ -55,7 +56,7 @@ The following arguments are supported:
   - `instance_close_delay_seconds` (Optional) – Delay before closing on upgrade.
   - `instance_restart_wait_seconds` (Optional) – Restart delay for failed
     instances.
-- `stateful` (Optional) – Required when `service_kind = "Stateful"`. Supports:
+- `stateful` (Optional) – Required when `service_kind = "Stateful"`. Configure as `stateful = { ... }`. Supports:
   - `target_replica_set_size` (Required) – Replica count per partition.
   - `min_replica_set_size` (Required) – Minimum replicas needed for quorum.
   - `has_persisted_state` (Required) – Whether the service persists state.

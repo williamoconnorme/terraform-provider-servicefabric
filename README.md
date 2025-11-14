@@ -159,11 +159,11 @@ resource "servicefabric_service" "api" {
   service_type_name = "Contoso.Sample.ApiServiceType"
   service_kind      = "Stateless"
 
-  partition {
+  partition = {
     scheme = "Singleton"
   }
 
-  stateless {
+  stateless = {
     instance_count = 3
   }
 }
@@ -180,11 +180,11 @@ resource "servicefabric_service" "api" {
   service_type_name = "Contoso.Sample.ApiServiceType"
   service_kind      = "Stateless"
 
-  partition {
+  partition = {
     scheme = "Singleton"
   }
 
-  stateless {
+  stateless = {
     instance_count = 3
   }
 }

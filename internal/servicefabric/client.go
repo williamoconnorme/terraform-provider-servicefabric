@@ -308,7 +308,12 @@ func (c *Client) GetApplicationTypeVersion(ctx context.Context, name, version st
 			return &item, nil
 		}
 	}
-	return nil, fmt.Errorf("application type %s/%s not found", name, version)
+	return nil, &APIError{
+		Method:     http.MethodGet,
+		Path:       "/ApplicationTypes",
+		StatusCode: http.StatusNotFound,
+		Message:    fmt.Sprintf("application type %s/%s not found", name, version),
+	}
 }
 
 // ListApplicationTypeVersions retrieves application type versions optionally filtered by name.

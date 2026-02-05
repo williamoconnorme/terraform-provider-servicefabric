@@ -3,6 +3,8 @@ package servicefabric
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 	"os"
@@ -31,18 +33,111 @@ func NewCertificateAuthenticator(path string, password string) (Authenticator, e
 		return nil, err
 	}
 
-	privateKey, certificate, err := pkcs12.Decode(raw, password)
+	privateKey, certificate, caCerts, err := decodePKCS12(raw, password)
 	if err != nil {
-		return nil, fmt.Errorf("pkcs12 decode: %w", err)
+		return nil, err
+	}
+
+	chain := make([][]byte, 0, 1+len(caCerts))
+	chain = append(chain, certificate.Raw)
+	for _, ca := range caCerts {
+		chain = append(chain, ca.Raw)
 	}
 
 	cert := tls.Certificate{
-		Certificate: [][]byte{certificate.Raw},
+		Certificate: chain,
 		PrivateKey:  privateKey,
 		Leaf:        certificate,
 	}
 
 	return &CertificateAuthenticator{cert: cert}, nil
+}
+
+func decodePKCS12(raw []byte, password string) (any, *x509.Certificate, []*x509.Certificate, error) {
+	// First try the simple decode for the common case.
+	privateKey, certificate, err := pkcs12.Decode(raw, password)
+	if err == nil {
+		return privateKey, certificate, nil, nil
+	}
+
+	// Fall back to parsing PEM blocks so we can handle chains/multiple bags.
+	blocks, err := pkcs12.ToPEM(raw, password)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("pkcs12 decode: %w", err)
+	}
+
+	var (
+		key        any
+		leaf       *x509.Certificate
+		caCerts    []*x509.Certificate
+		certBlocks [][]byte
+	)
+
+	for _, block := range blocks {
+		if block == nil {
+			continue
+		}
+		switch block.Type {
+		case "PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY":
+			parsedKey, err := parsePrivateKey(block.Bytes)
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("pkcs12 decode: %w", err)
+			}
+			key = parsedKey
+		case "CERTIFICATE":
+			cert, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("pkcs12 decode: %w", err)
+			}
+			certBlocks = append(certBlocks, cert.Raw)
+			caCerts = append(caCerts, cert)
+		}
+	}
+
+	if key == nil {
+		return nil, nil, nil, fmt.Errorf("pkcs12 decode: no private key found")
+	}
+	if len(caCerts) == 0 {
+		return nil, nil, nil, fmt.Errorf("pkcs12 decode: no certificate found")
+	}
+
+	// Pick the leaf certificate: prefer one that is not a CA.
+	for _, cert := range caCerts {
+		if !cert.IsCA {
+			leaf = cert
+			break
+		}
+	}
+	if leaf == nil {
+		leaf = caCerts[0]
+	}
+
+	// Remove the leaf from the CA list.
+	remaining := make([]*x509.Certificate, 0, len(caCerts)-1)
+	for _, cert := range caCerts {
+		if cert != leaf {
+			remaining = append(remaining, cert)
+		}
+	}
+
+	return key, leaf, remaining, nil
+}
+
+func parsePrivateKey(der []byte) (any, error) {
+	if key, err := x509.ParsePKCS8PrivateKey(der); err == nil {
+		return key, nil
+	}
+	if key, err := x509.ParsePKCS1PrivateKey(der); err == nil {
+		return key, nil
+	}
+	if key, err := x509.ParseECPrivateKey(der); err == nil {
+		return key, nil
+	}
+	// Some PFX blobs are returned as PEM-encoded DER inside a PEM block.
+	if block, _ := pem.Decode(der); block != nil {
+		return parsePrivateKey(block.Bytes)
+	}
+	return nil, fmt.Errorf("unsupported private key format")
 }
 
 // ConfigureHTTPClient attaches the client certificate to the TLS configuration.
@@ -55,6 +150,12 @@ func (c *CertificateAuthenticator) ConfigureHTTPClient(client *http.Client) erro
 		transport.TLSClientConfig = &tls.Config{}
 	}
 	transport.TLSClientConfig.Certificates = []tls.Certificate{c.cert}
+	// Force ALPN to HTTP/1.1 for cert auth.
+	transport.TLSClientConfig.NextProtos = []string{"http/1.1"}
+	// Some Service Fabric gateways request TLS renegotiation for client certs.
+	transport.TLSClientConfig.Renegotiation = tls.RenegotiateOnceAsClient
+	transport.ForceAttemptHTTP2 = false
+	transport.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
 	return nil
 }
 

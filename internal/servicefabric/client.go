@@ -87,28 +87,39 @@ func (c *Client) doRequest(ctx context.Context, method, path string, query url.V
 		return nil, err
 	}
 
-	var payload io.Reader
+	var payloadBytes []byte
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
 			return nil, err
 		}
-		payload = bytes.NewReader(b)
+		payloadBytes = b
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, urlStr, payload)
-	if err != nil {
-		return nil, err
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	req.Header.Set("Accept", "application/json")
-
-	if c.auth != nil {
-		if err := c.auth.Apply(ctx, req); err != nil {
+	newRequest := func() (*http.Request, error) {
+		var payload io.Reader
+		if payloadBytes != nil {
+			payload = bytes.NewReader(payloadBytes)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, urlStr, payload)
+		if err != nil {
 			return nil, err
 		}
+		if payloadBytes != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		req.Header.Set("Accept", "application/json")
+		if c.auth != nil {
+			if err := c.auth.Apply(ctx, req); err != nil {
+				return nil, err
+			}
+		}
+		return req, nil
+	}
+
+	req, err := newRequest()
+	if err != nil {
+		return nil, err
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -144,6 +155,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, query url.V
 
 	return resp, nil
 }
+
 
 func (c *Client) pollOperation(ctx context.Context, location string) error {
 	if location == "" {
